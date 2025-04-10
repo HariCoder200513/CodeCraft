@@ -353,6 +353,9 @@ class AuthComponent implements AfterViewInit, OnInit {
 }
 
 // CodeComponent
+// ... Previous imports remain the same ...
+
+// Update CodeComponent
 @Component({
   selector: 'app-code',
   template: `
@@ -362,6 +365,16 @@ class AuthComponent implements AfterViewInit, OnInit {
           <span class="gradient-text">CodeCraft</span>
         </div>
         <div class="flex items-center gap-4">
+          <select 
+            [(ngModel)]="selectedLanguage" 
+            (change)="onLanguageChange()" 
+            class="glassmorphism-input py-2 px-4"
+          >
+            <option value="cpp">C++</option>
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+            <option value="java">Java</option>
+          </select>
           <span class="text-2xl text-white">Welcome, {{ username }}!</span>
           <button 
             (click)="signOut()" 
@@ -373,7 +386,7 @@ class AuthComponent implements AfterViewInit, OnInit {
         </div>
       </div>
       <div class="flex w-full gap-4">
-        <div #editorContainer class="w-1/2 h-[600px] border border-gray-500"></div>
+        <div #editorContainer class="w-3/4 h-[800px] border border-gray-500"></div>
         <div class="w-1/2 h-[600px] flex flex-col">
           <button 
             (click)="runCode()" 
@@ -386,7 +399,7 @@ class AuthComponent implements AfterViewInit, OnInit {
           <div class="mb-4">
             <textarea 
               [(ngModel)]="userInput" 
-              placeholder="Enter input for your program (e.g., 'Hello' or numbers)..." 
+              placeholder="Enter input for your program..." 
               class="glassmorphism-input w-full h-[100px] p-4 resize-none"
               name="userInput"
             ></textarea>
@@ -404,12 +417,13 @@ class AuthComponent implements AfterViewInit, OnInit {
 class CodeComponent implements OnInit, AfterViewInit {
   @ViewChild('editorContainer', { static: false }) editorContainer!: ElementRef<HTMLDivElement>;
   username: string = '';
-  code: string = '#include <iostream>\n#include <string>\n\nint main() {\n    std::string input;\n    std::getline(std::cin, input);\n    std::cout << "Echo: " << input << "\\n";\n    return 0;\n}'; // Updated for input
+  selectedLanguage: string = 'cpp';
+  code: string = this.getDefaultCode('cpp');
   private editor: any;
   output: string = '';
   error: string = '';
   isRunning: boolean = false;
-  userInput: string = ''; // Added for user input
+  userInput: string = '';
   private apiUrl = 'http://localhost:5000/api';
 
   constructor(
@@ -424,13 +438,35 @@ class CodeComponent implements OnInit, AfterViewInit {
     const token = localStorage.getItem('token');
     this.username = localStorage.getItem('username') || '';
     if (!token) {
-      console.log('No token found, redirecting to login...');
       this.router.navigate(['/login']);
     }
   }
 
   ngAfterViewInit() {
     this.loadMonacoEditor();
+  }
+
+  getDefaultCode(language: string): string {
+    switch (language) {
+      case 'cpp':
+        return '#include <iostream>\n#include <string>\n\nint main() {\n    std::string input;\n    std::getline(std::cin, input);\n    std::cout << "Echo: " << input << "\\n";\n    return 0;\n}';
+      case 'javascript':
+        return 'const readline = require("readline");\nconst rl = readline.createInterface({\n    input: process.stdin,\n    output: process.stdout\n});\n\nrl.question("", (input) => {\n    console.log("Echo:", input);\n    rl.close();\n});';
+      case 'python':
+        return 'input_str = input()\nprint("Echo:", input_str)';
+      case 'java':
+        return 'import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner scanner = new Scanner(System.in);\n        String input = scanner.nextLine();\n        System.out.println("Echo: " + input);\n        scanner.close();\n    }\n}';
+      default:
+        return '';
+    }
+  }
+
+  onLanguageChange() {
+    this.code = this.getDefaultCode(this.selectedLanguage);
+    if (this.editor) {
+      this.editor.setValue(this.code);
+      (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), this.selectedLanguage);
+    }
   }
 
   runCode() {
@@ -441,24 +477,18 @@ class CodeComponent implements OnInit, AfterViewInit {
     const codeToRun = this.editor.getValue();
     const token = localStorage.getItem('token');
 
-    console.log('Code:', codeToRun);
-    console.log('Input:', this.userInput);
-    console.log('Token:', token);
-
     if (!token) {
       this.error = 'Authentication token not found. Please log in again.';
       this.isRunning = false;
-      console.log('No token found, redirecting to login...');
       this.router.navigate(['/login']);
       return;
     }
 
     this.http.post(`${this.apiUrl}/run`, 
-      { code: codeToRun, language: 'cpp', input: this.userInput },
+      { code: codeToRun, language: this.selectedLanguage, input: this.userInput },
       { headers: { 'x-auth-token': token } }
     ).pipe(
       catchError(error => {
-        console.error('HTTP Error:', error);
         if (error.status === 401) {
           this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
           localStorage.removeItem('token');
@@ -472,7 +502,6 @@ class CodeComponent implements OnInit, AfterViewInit {
       })
     ).subscribe({
       next: (response: any) => {
-        console.log('Backend response:', response);
         this.output = response.output || '';
         this.error = response.error || '';
         this.isRunning = false;
@@ -488,11 +517,7 @@ class CodeComponent implements OnInit, AfterViewInit {
     loaderScript.src = '/assets/monaco-editor/min/vs/loader.js';
     loaderScript.async = true;
     loaderScript.onload = () => {
-      console.log('Monaco loader.js loaded successfully');
       this.initializeMonacoEditor();
-    };
-    loaderScript.onerror = (err) => {
-      console.error('Failed to load Monaco loader.js:', err);
     };
     document.body.appendChild(loaderScript);
   }
@@ -504,154 +529,71 @@ class CodeComponent implements OnInit, AfterViewInit {
     require(['vs/editor/editor.main'], () => {
       this.editor = (<any>window).monaco.editor.create(this.editorContainer.nativeElement, {
         value: this.code,
-        language: 'cpp',
+        language: this.selectedLanguage,
         theme: 'vs-dark',
         automaticLayout: true,
         minimap: { enabled: false },
-        fontSize: 23,
-        readOnly: false,
-        suggestOnTriggerCharacters: true,
-        acceptSuggestionOnEnter: 'on',
-        quickSuggestions: { other: true, comments: true, strings: true },
-        parameterHints: { enabled: true },
-        hover: { enabled: true }
+        fontSize: 23
       });
 
-      (<any>window).monaco.languages.register({ id: 'cpp' });
-
-      (<any>window).monaco.languages.setMonarchTokensProvider('cpp', {
-        defaultToken: '',
-        tokenPostfix: '.cpp',
-        keywords: [
-          'int', 'float', 'double', 'char', 'void', 'bool', 'class', 'struct', 'namespace',
-          'if', 'else', 'while', 'for', 'switch', 'case', 'break', 'continue', 'return',
-          'public', 'private', 'protected', 'virtual', 'static', 'const', 'new', 'delete',
-          'using', 'try', 'catch', 'throw', 'template', 'typename'
-        ],
-        operators: [
-          '=', '>', '<', '!', '~', '?', ':', '==', '<=', '>=', '!=', '&&', '||', '++', '--',
-          '+', '-', '*', '/', '&', '|', '^', '%', '<<', '>>', '>>>', '+=', '-=', '*=', '/=',
-          '&=', '|=', '^=', '%=', '<<=', '>>=', '>>>='
-        ],
-        symbols: /[=><!~?:&|+\-*\/\^%]+/,
-        escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
-        tokenizer: {
-          root: [
-            [/[a-zA-Z_]\w*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
-            [/\/\/.*$/, 'comment'],
-            [/\/\*/, 'comment', '@comment'],
-            [/"([^"\\]|\\.)*$/, 'string.invalid'],
-            [/"/, 'string', '@string'],
-            [/#\s*include\s+<[^>]+>/, 'preprocessor'],
-            [/#\s*\w+/, 'preprocessor'],
-            [/[0-9]+/, 'number'],
-            [/@symbols/, { cases: { '@operators': 'operator', '@default': '' } }],
-            [/[\{\[\(]/, 'delimiter'],
-            [/[\}\]\)]/, 'delimiter']
-          ],
-          comment: [
-            [/[^\/*]+/, 'comment'],
-            [/\*\//, 'comment', '@pop'],
-            [/[\/*]/, 'comment']
-          ],
-          string: [
-            [/[^\\"]+/, 'string'],
-            [/@escapes/, 'string.escape'],
-            [/\\./, 'string.escape.invalid'],
-            [/"/, 'string', '@pop']
-          ]
+      // Register multiple languages
+      const languages = [
+        {
+          id: 'cpp',
+          keywords: ['int', 'float', 'double', 'char', 'void', 'bool', 'class', 'struct'],
+          defaultCode: this.getDefaultCode('cpp')
+        },
+        {
+          id: 'javascript',
+          keywords: ['let', 'const', 'var', 'function', 'if', 'else', 'for', 'while'],
+          defaultCode: this.getDefaultCode('javascript')
+        },
+        {
+          id: 'python',
+          keywords: ['def', 'if', 'elif', 'else', 'for', 'while', 'print', 'input'],
+          defaultCode: this.getDefaultCode('python')
+        },
+        {
+          id: 'java',
+          keywords: ['public', 'class', 'static', 'void', 'int', 'float', 'double', 'String'],
+          defaultCode: this.getDefaultCode('java')
         }
-      });
+      ];
 
-      (<any>window).monaco.languages.registerCompletionItemProvider('cpp', {
-        triggerCharacters: ['.', '::', '->'],
-        provideCompletionItems: (model: any, position: any) => {
-          const textUntilPosition = model.getValueInRange({
-            startLineNumber: 1,
-            startColumn: 1,
-            endLineNumber: position.lineNumber,
-            endColumn: position.column
-          });
-          const word = model.getWordUntilPosition(position);
-          const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn
-          };
-
-          const suggestions = [
-            { label: 'int', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'int', documentation: 'Integer type', range },
-            { label: 'float', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'float', documentation: 'Floating-point type', range },
-            { label: 'double', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'double', documentation: 'Double-precision floating-point type', range },
-            { label: 'char', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'char', documentation: 'Character type', range },
-            { label: 'void', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'void', documentation: 'Void type', range },
-            { label: 'bool', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'bool', documentation: 'Boolean type', range },
-            { label: 'if', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'if (${1:condition}) {\n\t$0\n}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'If statement', range },
-            { label: 'for', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'for (int ${1:i} = 0; ${1:i} < ${2:10}; ${1:i}++) {\n\t$0\n}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'For loop', range },
-            { label: 'while', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'while (${1:condition}) {\n\t$0\n}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'While loop', range },
-            { label: 'class', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'class ${1:ClassName} {\npublic:\n\t${1:ClassName}() {}\nprivate:\n\t$0\n};', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Class definition', range },
-            { label: 'struct', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'struct ${1:StructName} {\n\t$0\n};', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Struct definition', range },
-            { label: 'namespace', kind: (<any>window).monaco.languages.CompletionItemKind.Keyword, insertText: 'namespace ${1:NamespaceName} {\n\t$0\n}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Namespace definition', range },
-            { label: 'cout', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'std::cout', documentation: 'Standard output stream', range },
-            { label: 'cin', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'std::cin', documentation: 'Standard input stream', range },
-            { label: 'endl', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'std::endl', documentation: 'End of line manipulator W', range },
-            { label: 'cerr', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'std::cerr', documentation: 'Standard error stream', range },
-            { label: 'clog', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'std::clog', documentation: 'Standard log stream', range },
-            { label: 'printf', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'printf("${1:format}", ${2:args})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Formatted output function (stdio.h)', range },
-            { label: 'scanf', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'scanf("${1:format}", ${2:args})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Formatted input function (stdio.h)', range },
-            { label: 'getchar', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'getchar()', documentation: 'Read a character (stdio.h)', range },
-            { label: 'putchar', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'putchar(${1:char})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Write a character (stdio.h)', range },
-            { label: 'strlen', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'strlen(${1:str})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Get string length (string.h)', range },
-            { label: 'strcpy', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'strcpy(${1:dest}, ${2:src})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Copy string (string.h)', range },
-            { label: 'strcmp', kind: (<any>window).monaco.languages.CompletionItemKind.Function, insertText: 'strcmp(${1:str1}, ${2:str2})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Compare strings (string.h)', range },
-            { label: 'vector', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'std::vector<${1:int}> ${2:v}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Dynamic array (vector)', range },
-            { label: 'string', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'std::string ${1:s}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'String class (string)', range },
-            { label: 'map', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'std::map<${1:int}, ${2:int}> ${3:m}', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Associative container (map)', range },
-            { label: 'push_back', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'push_back(${1:value})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Add element to vector end', range },
-            { label: 'size', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'size()', documentation: 'Get container size', range },
-            { label: 'begin', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'begin()', documentation: 'Iterator to container beginning', range },
-            { label: 'end', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'end()', documentation: 'Iterator to container end', range }
-          ];
-
-          if (textUntilPosition.match(/std::cout\s*$/)) {
-            suggestions.push(
-              { label: '<<', kind: (<any>window).monaco.languages.CompletionItemKind.Operator, insertText: '<< ', documentation: 'Output operator for std::cout', range },
-              { label: 'flush', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'flush()', documentation: 'Flush the output buffer', range },
-              { label: 'precision', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'precision(${1:n})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Set floating-point precision', range }
-            );
-          } else if (textUntilPosition.match(/std::cin\s*$/)) {
-            suggestions.push(
-              { label: '>>', kind: (<any>window).monaco.languages.CompletionItemKind.Operator, insertText: '>> ', documentation: 'Input operator for std::cin', range },
-              { label: 'ignore', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'ignore(${1:n}, ${2:delim})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Ignore characters from input', range },
-              { label: 'get', kind: (<any>window).monaco.languages.CompletionItemKind.Method, insertText: 'get(${1:char})', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Get a character from input', range }
-            );
-          } else if (textUntilPosition.match(/std::\w*\s*$/)) {
-            suggestions.push(
-              { label: 'cout', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'cout', documentation: 'Standard output stream', range },
-              { label: 'cin', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'cin', documentation: 'Standard input stream', range },
-              { label: 'endl', kind: (<any>window).monaco.languages.CompletionItemKind.Variable, insertText: 'endl', documentation: 'End of line manipulator', range },
-              { label: 'vector', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'vector<${1:int}>', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Dynamic array (vector)', range },
-              { label: 'string', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'string', documentation: 'String class (string)', range },
-              { label: 'map', kind: (<any>window).monaco.languages.CompletionItemKind.Class, insertText: 'map<${1:int}, ${2:int}>', insertTextRules: (<any>window).monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: 'Associative container (map)', range }
-            );
+      languages.forEach(lang => {
+        (<any>window).monaco.languages.register({ id: lang.id });
+        (<any>window).monaco.languages.setMonarchTokensProvider(lang.id, {
+          keywords: lang.keywords,
+          tokenizer: {
+            root: [
+              [/[a-zA-Z_]\w*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
+              [/\/\/.*$/, 'comment'],
+              [/\/\*/, 'comment', '@comment'],
+              [/"([^"\\]|\\.)*$/, 'string.invalid'],
+              [/"/, 'string', '@string'],
+              [/[0-9]+/, 'number']
+            ],
+            comment: [
+              [/[^\/*]+/, 'comment'],
+              [/\*\//, 'comment', '@pop'],
+              [/[\/*]/, 'comment']
+            ],
+            string: [
+              [/[^\\"]+/, 'string'],
+              [/\\./, 'string.escape.invalid'],
+              [/"/, 'string', '@pop']
+            ]
           }
-
-          return { suggestions };
-        }
+        });
       });
 
       this.editor.onDidChangeModelContent(() => {
         this.code = this.editor.getValue();
       });
-
-      this.editor.focus();
-      console.log('Monaco Editor initialized:', this.editor);
     });
   }
 
   signOut() {
-    console.log('Sign out initiated...');
     if (confirm('Are you sure you want to sign out?')) {
       localStorage.removeItem('token');
       localStorage.removeItem('username');
@@ -661,6 +603,7 @@ class CodeComponent implements OnInit, AfterViewInit {
   }
 }
 
+// ... Rest of the main.ts remains the same ...
 // LandingComponent
 @Component({
   selector: 'app-landing',

@@ -6,10 +6,12 @@ const GitHubStrategy = require('passport-github2').Strategy;
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const https = require('https');
 require('dotenv').config();
 
 const app = express();
 
+// Middleware
 app.use(cors({
   origin: 'http://localhost:4200',
   credentials: true
@@ -17,6 +19,7 @@ app.use(cors({
 app.use(express.json());
 app.use(passport.initialize());
 
+// MongoDB Connection
 const connectDB = async () => {
   try {
     if (!process.env.MONGODB_URI) {
@@ -34,6 +37,7 @@ const connectDB = async () => {
 };
 connectDB();
 
+// User Schema
 const UserSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -76,6 +80,7 @@ UserSchema.pre('save', async function(next) {
 
 const User = mongoose.model('User', UserSchema);
 
+// Passport Configuration
 passport.serializeUser((user, done) => {
   done(null, user.id);
 });
@@ -123,6 +128,7 @@ passport.use(new GitHubStrategy({
   }
 }));
 
+// Authentication Middleware
 const auth = (req, res, next) => {
   const token = req.header('x-auth-token');
   if (!token) {
@@ -137,6 +143,7 @@ const auth = (req, res, next) => {
   }
 };
 
+// Authentication Routes
 const authRoutes = express.Router();
 
 authRoutes.post('/signup', async (req, res) => {
@@ -198,25 +205,37 @@ authRoutes.get('/github/callback',
   }
 );
 
+// Piston API Configuration
 const PISTON_API_URL = 'https://emkc.org/api/v2/piston/execute';
 
-let cppVersion = '10.2.0'; 
-async function fetchCppVersion() {
+let languageVersions = {
+  'cpp': '10.2.0',
+  'javascript': '18.15.0',
+  'python': '3.10.0',
+  'java': '15.0.2'
+};
+
+async function fetchLanguageVersions() {
   try {
     const response = await axios.get('https://emkc.org/api/v2/piston/runtimes');
-    const cppRuntimes = response.data.filter(r => r.language === 'cpp');
-    if (cppRuntimes.length > 0) {
-      cppVersion = cppRuntimes[0].version; 
-      console.log(`Fetched C++ version: ${cppVersion}`);
-    } else {
-      console.log('No C++ runtimes found, using fallback:', cppVersion);
-    }
+    const runtimes = response.data;
+    
+    const supportedLanguages = ['cpp', 'javascript', 'python', 'java'];
+    supportedLanguages.forEach(lang => {
+      const runtime = runtimes.find(r => r.language === lang);
+      if (runtime) {
+        languageVersions[lang] = runtime.version;
+        console.log(`Fetched ${lang} version: ${languageVersions[lang]}`);
+      }
+    });
   } catch (error) {
-    console.error('Failed to fetch Piston runtimes, using fallback:', error.message);
+    console.error('Failed to fetch Piston runtimes, using fallbacks:', error.message);
+    console.log('Fallback versions:', languageVersions);
   }
 }
-fetchCppVersion(); 
+fetchLanguageVersions();
 
+// Code Execution Endpoint
 app.post('/api/run', auth, async (req, res) => {
   const { code, language, input } = req.body;
 
@@ -224,26 +243,37 @@ app.post('/api/run', auth, async (req, res) => {
     return res.status(400).json({ error: 'Code and language are required' });
   }
 
-  if (language !== 'cpp') {
-    return res.status(400).json({ error: 'Only C++ is supported currently' });
+  const supportedLanguages = ['cpp', 'javascript', 'python', 'java'];
+  if (!supportedLanguages.includes(language)) {
+    return res.status(400).json({ error: `Unsupported language. Supported languages: ${supportedLanguages.join(', ')}` });
   }
 
   try {
-    console.log('Sending to Piston API:', { code, language, input, version: cppVersion });
+    console.log('Sending to Piston API:', { code, language, input, version: languageVersions[language] });
+
+    const fileExtensions = {
+      'cpp': 'cpp',
+      'javascript': 'js',
+      'python': 'py',
+      'java': 'java'
+    };
 
     const pistonResponse = await axios.post(PISTON_API_URL, {
-      language: 'cpp',
-      version: cppVersion, // Use dynamically fetched version
+      language,
+      version: languageVersions[language],
       files: [{
-        name: 'main.cpp',
+        name: `main.${fileExtensions[language]}`,
         content: code
       }],
-      stdin: input || '', // Pass user input to stdin
+      stdin: input || '',
       args: [],
-      compile_timeout: 10000, // 10 seconds
-      run_timeout: 3000 // 3 seconds
+      compile_timeout: 10000,
+      run_timeout: 3000
     }, {
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: false
+      })
     });
 
     const { run } = pistonResponse.data;
