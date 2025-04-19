@@ -12,10 +12,20 @@ import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { jwtDecode } from 'jwt-decode';
 import { FontAwesomeModule, FaIconLibrary } from '@fortawesome/angular-fontawesome';
-import { faEnvelope, faLock, faArrowRight, faSignOutAlt } from '@fortawesome/free-solid-svg-icons';
+import { faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle } from '@fortawesome/free-solid-svg-icons';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Title } from '@angular/platform-browser';
-import { enableProdMode } from '@angular/core'; // Moved enableProdMode import here
+import { enableProdMode } from '@angular/core';
+import { ToastrModule, ToastrService } from 'ngx-toastr';
+
+// Interface for File
+interface SavedFile {
+  _id: string;
+  filename: string;
+  language: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // AuthComponent
 @Component({
@@ -24,7 +34,7 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
     <div class="relative min-h-screen flex items-center justify-center p-4">
       <div class="relative flex flex-col md:flex-row items-center justify-center gap-12 w-full max-w-6xl z-10">
         <div class="glassmorphism p-8 rounded-2xl w-full max-w-md">
-          <div [@routeAnimation]="isSignupRoute ? 'signup' : 'login'">
+          <div [@routeAnimation]="getRouteAnimationState()">
             <div *ngIf="isSignupRoute">
               <h2 class="text-3xl font-bold text-white mb-6 text-center">Create an account</h2>
               <div class="flex gap-4 mb-6">
@@ -66,6 +76,30 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
                     autocomplete="off"
                   >
                 </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="text" 
+                    placeholder="Secret Question (e.g., What is your pet's name?)" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretQuestion"
+                    name="secretQuestion"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="text" 
+                    placeholder="Secret Answer" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretAnswer"
+                    name="secretAnswer"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
                 <button 
                   type="submit" 
                   class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
@@ -78,8 +112,11 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
               <div class="text-center mt-4">
                 <a routerLink="/login" class="text-gray-400 hover:text-white">Already have an account? Log in</a>
               </div>
+              <div class="text-center mt-2">
+                <a routerLink="/forgot-password" class="text-gray-400 hover:text-white">Forgot Password?</a>
+              </div>
             </div>
-            <div *ngIf="!isSignupRoute">
+            <div *ngIf="isLoginRoute">
               <h2 class="text-3xl font-bold text-white mb-6 text-center">Log in</h2>
               <div class="flex gap-4 mb-6">
                 <button (click)="loginWithGithub()" class="glassmorphism-button flex-1 flex items-center justify-center gap-2 py-3">
@@ -120,6 +157,18 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
                     autocomplete="off"
                   >
                 </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="text" 
+                    placeholder="Secret Answer" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretAnswer"
+                    name="secretAnswer"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
                 <button 
                   type="submit" 
                   class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
@@ -131,6 +180,102 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
               <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
               <div class="text-center mt-4">
                 <a routerLink="/signup" class="text-gray-400 hover:text-white">Don't have an account? Sign up</a>
+              </div>
+              <div class="text-center mt-2">
+                <a routerLink="/forgot-password" class="text-gray-400 hover:text-white">Forgot Password?</a>
+              </div>
+            </div>
+            <div *ngIf="isResetPasswordRoute">
+              <h2 class="text-3xl font-bold text-white mb-6 text-center">Reset Password</h2>
+              <form (ngSubmit)="onResetPasswordSubmit()" class="space-y-4">
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'envelope']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="email" 
+                    placeholder="m@example.com" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="email"
+                    name="email"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="text" 
+                    placeholder="Secret Answer" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretAnswer"
+                    name="secretAnswer"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'lock']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="password" 
+                    placeholder="New Password" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="password"
+                    name="password"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <button 
+                  type="submit" 
+                  class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
+                >
+                  <span class="text-black">Reset Password</span>
+                  <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
+                </button>
+              </form>
+              <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
+              <div class="text-center mt-4">
+                <a routerLink="/login" class="text-gray-400 hover:text-white">Back to Login</a>
+              </div>
+            </div>
+            <div *ngIf="isForgotPasswordRoute">
+              <h2 class="text-3xl font-bold text-white mb-6 text-center">Forgot Password</h2>
+              <form (ngSubmit)="onForgotPasswordSubmit()" class="space-y-4">
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'envelope']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="email" 
+                    placeholder="m@example.com" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="email"
+                    name="email"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <input 
+                    type="text" 
+                    placeholder="Secret Answer" 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretAnswer"
+                    name="secretAnswer"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <button 
+                  type="submit" 
+                  class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
+                >
+                  <span class="text-black">Retrieve Password</span>
+                  <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
+                </button>
+              </form>
+              <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
+              <div class="text-center mt-4 text-green-500" *ngIf="retrievedPassword">Your password is: {{retrievedPassword}}</div>
+              <div class="text-center mt-4">
+                <a routerLink="/login" class="text-gray-400 hover:text-white">Back to Login</a>
               </div>
             </div>
           </div>
@@ -145,15 +290,9 @@ import { enableProdMode } from '@angular/core'; // Moved enableProdMode import h
     trigger('routeAnimation', [
       state('signup', style({ opacity: 1, transform: 'translateX(0)' })),
       state('login', style({ opacity: 1, transform: 'translateX(0)' })),
-      transition('signup => login', [
-        style({ opacity: 1, transform: 'translateX(0)' }),
-        animate('300ms ease-in-out', style({ opacity: 0, transform: 'translateX(-20%)' }))
-      ]),
-      transition('login => signup', [
-        style({ opacity: 1, transform: 'translateX(0)' }),
-        animate('300ms ease-in-out', style({ opacity: 0, transform: 'translateX(20%)' }))
-      ]),
-      transition('signup => login, login => signup', [
+      state('reset-password', style({ opacity: 1, transform: 'translateX(0)' })),
+      state('forgot-password', style({ opacity: 1, transform: 'translateX(0)' })),
+      transition('signup => login, login => signup, signup => reset-password, reset-password => signup, login => reset-password, reset-password => login, signup => forgot-password, forgot-password => signup, login => forgot-password, forgot-password => login, reset-password => forgot-password, forgot-password => reset-password', [
         style({ opacity: 0, transform: 'translateX(20%)' }),
         animate('300ms ease-in-out', style({ opacity: 1, transform: 'translateX(0)' }))
       ])
@@ -176,22 +315,55 @@ class AuthComponent implements AfterViewInit, OnInit {
 
   email: string = '';
   password: string = '';
-  isSignupRoute: boolean = true;
+  secretQuestion: string = '';
+  secretAnswer: string = '';
+  retrievedPassword: string = '';
+  isSignupRoute: boolean = false;
+  isLoginRoute: boolean = false;
+  isResetPasswordRoute: boolean = false;
+  isForgotPasswordRoute: boolean = false;
   errorMessage: string = '';
 
-  constructor(private router: Router, private http: HttpClient, private titleService: Title) {
+  constructor(
+    private router: Router, 
+    private http: HttpClient, 
+    private titleService: Title,
+    private toastr: ToastrService
+  ) {
+    console.log('AuthComponent initialized, ToastrService injected');
+    setTimeout(() => {
+      this.toastr.info('AuthComponent loaded', 'Debug');
+    }, 1000);
     this.router.events.subscribe(() => {
       const currentUrl = this.router.url.split('?')[0];
       this.isSignupRoute = currentUrl === '/signup' || currentUrl === '/';
+      this.isLoginRoute = currentUrl === '/login';
+      this.isResetPasswordRoute = currentUrl === '/reset-password';
+      this.isForgotPasswordRoute = currentUrl === '/forgot-password';
       if (this.isSignupRoute) {
         this.titleService.setTitle('CodeCraft - Signup');
-      } else if (currentUrl === '/login') {
+      } else if (this.isLoginRoute) {
         this.titleService.setTitle('CodeCraft - Login');
+      } else if (this.isResetPasswordRoute) {
+        this.titleService.setTitle('CodeCraft - Reset Password');
+      } else if (this.isForgotPasswordRoute) {
+        this.titleService.setTitle('CodeCraft - Forgot Password');
       }
       this.email = '';
       this.password = '';
+      this.secretQuestion = '';
+      this.secretAnswer = '';
       this.errorMessage = '';
+      this.retrievedPassword = '';
     });
+  }
+
+  getRouteAnimationState(): string {
+    if (this.isSignupRoute) return 'signup';
+    if (this.isLoginRoute) return 'login';
+    if (this.isResetPasswordRoute) return 'reset-password';
+    if (this.isForgotPasswordRoute) return 'forgot-password';
+    return 'signup';
   }
 
   ngOnInit() {
@@ -213,7 +385,7 @@ class AuthComponent implements AfterViewInit, OnInit {
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     this.scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // Fixed typo: removed "Taxes"
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(0, 10, 10);
     this.scene.add(directionalLight);
 
@@ -279,12 +451,20 @@ class AuthComponent implements AfterViewInit, OnInit {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private signup(email: string, password: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/signup`, { email, password });
+  private signup(email: string, password: string, secretQuestion: string, secretAnswer: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/signup`, { email, password, secretQuestion, secretAnswer });
   }
 
-  private login(email: string, password: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/login`, { email, password });
+  private login(email: string, password: string, secretAnswer: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/login`, { email, password, secretAnswer });
+  }
+
+  private resetPassword(email: string, secretAnswer: string, newPassword: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/reset-password`, { email, secretAnswer, newPassword });
+  }
+
+  private forgotPassword(email: string, secretAnswer: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/forgot-password`, { email, secretAnswer });
   }
 
   loginWithGithub() {
@@ -307,16 +487,19 @@ class AuthComponent implements AfterViewInit, OnInit {
       const username = decoded.username || decoded.email.split('@')[0];
       localStorage.setItem('username', username);
       console.log('Token stored, username:', username);
+      this.toastr.success('GitHub login successful!', 'Success');
       this.router.navigate(['/code']);
     } else {
-      this.errorMessage = error || 'Authentication failed. Please try again.';
+      this.errorMessage = error || 'GitHub authentication failed. Please try again.';
+      this.toastr.error(this.errorMessage, 'Error');
       console.log('Authentication failed:', this.errorMessage);
       this.router.navigate(['/login']);
     }
   }
 
   onSignupSubmit() {
-    this.signup(this.email, this.password).subscribe({
+    console.log('Signup submitted:', this.email);
+    this.signup(this.email, this.password, this.secretQuestion, this.secretAnswer).subscribe({
       next: (response) => {
         localStorage.setItem('token', response.token);
         const decoded: any = jwtDecode(response.token);
@@ -325,16 +508,22 @@ class AuthComponent implements AfterViewInit, OnInit {
         this.errorMessage = '';
         this.email = '';
         this.password = '';
+        this.secretQuestion = '';
+        this.secretAnswer = '';
+        this.toastr.success('Signup successful! Welcome to CodeCraft!', 'Success');
         this.router.navigate(['/code']);
       },
       error: (error) => {
         this.errorMessage = error.error?.message || 'Signup failed';
+        this.toastr.error(this.errorMessage, 'Error');
+        console.error('Signup error:', error);
       }
     });
   }
 
   onLoginSubmit() {
-    this.login(this.email, this.password).subscribe({
+    console.log('Login submitted:', this.email);
+    this.login(this.email, this.password, this.secretAnswer).subscribe({
       next: (response) => {
         localStorage.setItem('token', response.token);
         const decoded: any = jwtDecode(response.token);
@@ -343,19 +532,55 @@ class AuthComponent implements AfterViewInit, OnInit {
         this.errorMessage = '';
         this.email = '';
         this.password = '';
+        this.secretAnswer = '';
+        this.toastr.success('Login successful! Ready to code!', 'Success');
         this.router.navigate(['/code']);
       },
       error: (error) => {
         this.errorMessage = error.error?.message || 'Login failed';
+        this.toastr.error(this.errorMessage, 'Error');
+        console.error('Login error:', error);
+      }
+    });
+  }
+
+  onResetPasswordSubmit() {
+    console.log('Reset password submitted:', this.email);
+    this.resetPassword(this.email, this.secretAnswer, this.password).subscribe({
+      next: (response) => {
+        this.errorMessage = '';
+        this.email = '';
+        this.secretAnswer = '';
+        this.password = '';
+        this.toastr.success('Password reset successful!', 'Success');
+        this.router.navigate(['/login']);
+      },
+      error: (error) => {
+        this.errorMessage = error.error?.message || 'Password reset failed';
+        this.toastr.error(this.errorMessage, 'Error');
+        console.error('Reset password error:', error);
+      }
+    });
+  }
+
+  onForgotPasswordSubmit() {
+    console.log('Forgot password submitted:', this.email);
+    this.forgotPassword(this.email, this.secretAnswer).subscribe({
+      next: (response) => {
+        this.retrievedPassword = response.password;
+        this.errorMessage = '';
+        this.toastr.success('Password retrieved successfully!', 'Success');
+      },
+      error: (error) => {
+        this.errorMessage = error.error?.message || 'Password retrieval failed';
+        this.toastr.error(this.errorMessage, 'Error');
+        console.error('Forgot password error:', error);
       }
     });
   }
 }
 
-// CodeComponent
-// ... Previous imports remain the same ...
-
-// Update CodeComponent
+// CodeComponent (unchanged)
 @Component({
   selector: 'app-code',
   template: `
@@ -386,17 +611,59 @@ class AuthComponent implements AfterViewInit, OnInit {
         </div>
       </div>
       <div class="flex w-full gap-4">
-        <div #editorContainer class="w-3/4 h-[800px] border border-gray-500"></div>
-        <div class="w-1/2 h-[600px] flex flex-col">
-          <button 
-            (click)="runCode()" 
-            class="glassmorphism-button mb-4 py-2 px-4 self-start"
-            [disabled]="isRunning"
-          >
-            <span class="text-black">{{ isRunning ? 'Running...' : 'Run Code' }}</span>
-            <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
-          </button>
-          <div class="mb-4">
+        <div class="w-1/4 flex flex-col">
+          <div class="glassmorphism p-4 rounded-xl mb-4 h-[800px] overflow-auto">
+            <h3 class="text-xl font-bold text-white mb-2">Saved Files</h3>
+            <div *ngIf="isLoadingFiles" class="text-white">Loading files...</div>
+            <div *ngIf="!isLoadingFiles && savedFiles.length === 0" class="text-white">No saved files</div>
+            <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2">
+              <li *ngFor="let file of savedFiles" 
+                  class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
+                  [class.bg-white]="selectedFileId === file._id"
+                  [class.bg-opacity-10]="selectedFileId === file._id"
+                  (click)="loadFile(file._id)"
+              >
+                <div class="flex items-center gap-2">
+                  <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
+                  <span>{{ file.filename }}</span>
+                </div>
+                <div class="text-sm text-gray-400">
+                  {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="w-3/4 flex flex-col">
+          <div #editorContainer class="h-[800px] border border-gray-500"></div>
+          <div class="flex flex-col gap-4 mt-4">
+            <div class="flex gap-4">
+              <button 
+                (click)="runCode()" 
+                class="glassmorphism-button py-2 px-4"
+                [disabled]="isRunning"
+              >
+                <span class="text-black">{{ isRunning ? 'Running...' : 'Run Code' }}</span>
+                <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
+              </button>
+              <button 
+                (click)="saveCode()" 
+                class="glassmorphism-button py-2 px-4"
+                [disabled]="isSaving || !filename"
+              >
+                <span class="text-black">{{ isSaving ? 'Saving...' : 'Save Code' }}</span>
+                <fa-icon [icon]="['fas', 'save']" class="text-lg glassmorphism-icon"></fa-icon>
+              </button>
+            </div>
+            <input 
+              [(ngModel)]="filename" 
+              placeholder="Enter filename (e.g., mycode.cpp)" 
+              class="glassmorphism-input w-full py-2 px-4"
+              name="filename"
+              (input)="onFilenameChange()"
+            >
+          </div>
+          <div class="mt-4">
             <textarea 
               [(ngModel)]="userInput" 
               placeholder="Enter input for your program..." 
@@ -404,10 +671,11 @@ class AuthComponent implements AfterViewInit, OnInit {
               name="userInput"
             ></textarea>
           </div>
-          <div class="glassmorphism p-4 rounded-xl h-full overflow-auto">
+          <div class="glassmorphism p-4 rounded-xl mt-4 overflow-auto">
             <h3 class="text-xl font-bold text-white mb-2">Output</h3>
             <pre class="text-white whitespace-pre-wrap">{{ output }}</pre>
             <div *ngIf="error" class="text-red-500 mt-2">{{ error }}</div>
+            <div *ngIf="saveMessage" class="text-green-500 mt-2">{{ saveMessage }}</div>
           </div>
         </div>
       </div>
@@ -422,15 +690,26 @@ class CodeComponent implements OnInit, AfterViewInit {
   private editor: any;
   output: string = '';
   error: string = '';
+  saveMessage: string = '';
   isRunning: boolean = false;
+  isSaving: boolean = false;
+  isLoadingFiles: boolean = false;
   userInput: string = '';
+  filename: string = '';
+  savedFiles: SavedFile[] = [];
+  selectedFileId: string | null = null;
   private apiUrl = 'http://localhost:5000/api';
 
   constructor(
     private router: Router, 
     private titleService: Title,
-    private http: HttpClient
+    private http: HttpClient,
+    private toastr: ToastrService
   ) {
+    console.log('CodeComponent initialized, ToastrService injected');
+    setTimeout(() => {
+      this.toastr.info('CodeComponent loaded', 'Debug');
+    }, 1000);
     this.titleService.setTitle('CodeCraft - Code Editor');
   }
 
@@ -438,7 +717,10 @@ class CodeComponent implements OnInit, AfterViewInit {
     const token = localStorage.getItem('token');
     this.username = localStorage.getItem('username') || '';
     if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
+    } else {
+      this.fetchSavedFiles();
     }
   }
 
@@ -449,13 +731,42 @@ class CodeComponent implements OnInit, AfterViewInit {
   getDefaultCode(language: string): string {
     switch (language) {
       case 'cpp':
-        return '#include <iostream>\n#include <string>\n\nint main() {\n    std::string input;\n    std::getline(std::cin, input);\n    std::cout << "Echo: " << input << "\\n";\n    return 0;\n}';
+        return `#include <iostream>
+using namespace std;
+
+int main() {
+    int num;
+    cout << "Enter a number: ";
+    cin >> num;
+    cout << "You entered: " << num << "\\n";
+    return 0;
+}`;
       case 'javascript':
-        return 'const readline = require("readline");\nconst rl = readline.createInterface({\n    input: process.stdin,\n    output: process.stdout\n});\n\nrl.question("", (input) => {\n    console.log("Echo:", input);\n    rl.close();\n});';
+        return `const readline = require('readline');
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
+
+rl.question('Enter a number: ', (num) => {
+    console.log('You entered:', parseInt(num));
+    rl.close();
+});`;
       case 'python':
-        return 'input_str = input()\nprint("Echo:", input_str)';
+        return `num = int(input("Enter a number: "))
+print("You entered:", num)`;
       case 'java':
-        return 'import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner scanner = new Scanner(System.in);\n        String input = scanner.nextLine();\n        System.out.println("Echo: " + input);\n        scanner.close();\n    }\n}';
+        return `import java.util.Scanner;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        System.out.print("Enter a number: ");
+        int num = scanner.nextInt();
+        System.out.println("You entered: " + num);
+        scanner.close();
+    }
+}`;
       default:
         return '';
     }
@@ -463,22 +774,125 @@ class CodeComponent implements OnInit, AfterViewInit {
 
   onLanguageChange() {
     this.code = this.getDefaultCode(this.selectedLanguage);
+    this.filename = '';
+    this.saveMessage = '';
+    this.error = '';
+    this.selectedFileId = null;
     if (this.editor) {
       this.editor.setValue(this.code);
       (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), this.selectedLanguage);
     }
   }
 
+  onFilenameChange() {
+    this.saveMessage = '';
+    this.error = '';
+  }
+
+  fetchSavedFiles() {
+    this.isLoadingFiles = true;
+    this.error = '';
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.isLoadingFiles = false;
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.http.get<SavedFile[]>(`${this.apiUrl}/files/list`, {
+      headers: { 'x-auth-token': token }
+    }).pipe(
+      catchError(error => {
+        if (error.status === 401) {
+          this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
+          this.toastr.error(this.error, 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          this.router.navigate(['/login']);
+        } else {
+          this.error = error.error?.message || 'Error retrieving files';
+          this.toastr.error(this.error, 'Error');
+        }
+        this.isLoadingFiles = false;
+        return throwError(error);
+      })
+    ).subscribe({
+      next: (files) => {
+        this.savedFiles = files;
+        this.isLoadingFiles = false;
+        this.toastr.success('Files retrieved successfully!', 'Success');
+      },
+      error: () => {
+        this.isLoadingFiles = false;
+      }
+    });
+  }
+
+  loadFile(fileId: string) {
+    this.isLoadingFiles = true;
+    this.error = '';
+    this.saveMessage = '';
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      this.error = 'Authentication token not found. Please log in again.';
+      this.toastr.error(this.error, 'Error');
+      this.isLoadingFiles = false;
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.http.get(`${this.apiUrl}/files/${fileId}`, {
+      headers: { 'x-auth-token': token }
+    }).pipe(
+      catchError(error => {
+        if (error.status === 401) {
+          this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
+          this.toastr.error(this.error, 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          this.router.navigate(['/login']);
+        } else {
+          this.error = error.error?.message || 'Error loading file';
+          this.toastr.error(this.error, 'Error');
+        }
+        this.isLoadingFiles = false;
+        return throwError(error);
+      })
+    ).subscribe({
+      next: (file: any) => {
+        this.selectedFileId = fileId;
+        this.filename = file.filename;
+        this.selectedLanguage = file.language;
+        this.code = file.code;
+        if (this.editor) {
+          this.editor.setValue(this.code);
+          (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), this.selectedLanguage);
+        }
+        this.isLoadingFiles = false;
+        this.toastr.success(`File "${file.filename}" loaded successfully!`, 'Success');
+      },
+      error: () => {
+        this.isLoadingFiles = false;
+      }
+    });
+  }
+
   runCode() {
+    console.log('Running code...');
     this.isRunning = true;
     this.output = '';
     this.error = '';
+    this.saveMessage = '';
 
     const codeToRun = this.editor.getValue();
     const token = localStorage.getItem('token');
 
     if (!token) {
       this.error = 'Authentication token not found. Please log in again.';
+      this.toastr.error(this.error, 'Error');
       this.isRunning = false;
       this.router.navigate(['/login']);
       return;
@@ -491,11 +905,13 @@ class CodeComponent implements OnInit, AfterViewInit {
       catchError(error => {
         if (error.status === 401) {
           this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
+          this.toastr.error(this.error, 'Error');
           localStorage.removeItem('token');
           localStorage.removeItem('username');
           this.router.navigate(['/login']);
         } else {
           this.error = error.error?.error || error.message || 'Error running code';
+          this.toastr.error(this.error, 'Error');
         }
         this.isRunning = false;
         return throwError(error);
@@ -505,9 +921,72 @@ class CodeComponent implements OnInit, AfterViewInit {
         this.output = response.output || '';
         this.error = response.error || '';
         this.isRunning = false;
+        if (this.error) {
+          this.toastr.error('Code execution failed!', 'Error');
+        } else {
+          this.toastr.success('Code executed successfully!', 'Success');
+        }
       },
       error: () => {
         this.isRunning = false;
+      }
+    });
+  }
+
+  saveCode() {
+    console.log('Saving code:', this.filename);
+    if (!this.filename) {
+      this.error = 'Please enter a filename';
+      this.toastr.error(this.error, 'Error');
+      return;
+    }
+
+    this.isSaving = true;
+    this.saveMessage = '';
+    this.error = '';
+
+    const codeToSave = this.editor.getValue();
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      this.error = 'Authentication token not found. Please log in again.';
+      this.toastr.error(this.error, 'Error');
+      this.isSaving = false;
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.http.post(`${this.apiUrl}/files/save`, 
+      { 
+        filename: this.filename, 
+        language: this.selectedLanguage, 
+        code: codeToSave 
+      },
+      { headers: { 'x-auth-token': token } }
+    ).pipe(
+      catchError(error => {
+        if (error.status === 401) {
+          this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
+          this.toastr.error(this.error, 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          this.router.navigate(['/login']);
+        } else {
+          this.error = error.error?.message || 'Error saving code';
+          this.toastr.error(this.error, 'Error');
+        }
+        this.isSaving = false;
+        return throwError(error);
+      })
+    ).subscribe({
+      next: (response: any) => {
+        this.saveMessage = response.message || 'Code saved successfully';
+        this.isSaving = false;
+        this.toastr.success(`File "${this.filename}" saved successfully!`, 'Success');
+        this.fetchSavedFiles();
+      },
+      error: () => {
+        this.isSaving = false;
       }
     });
   }
@@ -598,13 +1077,15 @@ class CodeComponent implements OnInit, AfterViewInit {
       localStorage.removeItem('token');
       localStorage.removeItem('username');
       this.username = '';
+      this.savedFiles = [];
+      this.selectedFileId = null;
+      this.toastr.info('Logged out successfully', 'Info');
       this.router.navigate(['/login']);
     }
   }
 }
 
-// ... Rest of the main.ts remains the same ...
-// LandingComponent
+// LandingComponent (unchanged)
 @Component({
   selector: 'app-landing',
   template: `
@@ -832,7 +1313,14 @@ class AppComponent implements AfterViewInit {
   isLoggedIn: boolean = false;
   username: string = '';
 
-  constructor(public router: Router) {
+  constructor(
+    public router: Router,
+    private toastr: ToastrService
+  ) {
+    console.log('AppComponent initialized, ToastrService injected');
+    setTimeout(() => {
+      this.toastr.info('AppComponent loaded', 'Debug');
+    }, 1000);
     this.checkLoginStatus();
     this.router.events.subscribe(event => {
       if (event instanceof NavigationEnd) {
@@ -946,6 +1434,7 @@ class AppComponent implements AfterViewInit {
       localStorage.removeItem('username');
       this.isLoggedIn = false;
       this.username = '';
+      this.toastr.info('Logged out successfully', 'Info');
       this.router.navigate(['/login']);
     }
   }
@@ -958,6 +1447,8 @@ const routes: Routes = [
   { path: 'login', component: AuthComponent },
   { path: 'auth/callback', component: AuthComponent },
   { path: 'code', component: CodeComponent },
+  { path: 'reset-password', component: AuthComponent },
+  { path: 'forgot-password', component: AuthComponent },
   { path: '**', redirectTo: '' }
 ];
 
@@ -970,14 +1461,22 @@ const routes: Routes = [
     HttpClientModule,
     RouterModule.forRoot(routes),
     BrowserAnimationsModule,
-    FontAwesomeModule
+    FontAwesomeModule,
+    ToastrModule.forRoot({
+      timeOut: 3000,
+      positionClass: 'toast-top-right',
+      preventDuplicates: true,
+      progressBar: true,
+      closeButton: true,
+      enableHtml: false
+    })
   ],
   bootstrap: [AppComponent],
   providers: [Title]
 })
 class AppModule {
   constructor(library: FaIconLibrary) {
-    library.addIcons(faGithub, faEnvelope, faLock, faArrowRight, faSignOutAlt);
+    library.addIcons(faGithub, faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle);
   }
 }
 
@@ -987,7 +1486,7 @@ fontLink.href = 'https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700
 fontLink.rel = 'stylesheet';
 document.head.appendChild(fontLink);
 
-// Tailwind Styles
+// Tailwind and Toastr Styles
 const tailwindStyles = `
   @tailwind base;
   @tailwind components;
@@ -1065,6 +1564,69 @@ const tailwindStyles = `
       -webkit-text-fill-color: transparent;
       font-family: 'Rubik', sans-serif;
     }
+    /* Toastr custom styles */
+    .toast-success {
+      background: rgba(40, 167, 69, 0.9) !important;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff !important;
+      font-family: 'Rubik', sans-serif;
+      z-index: 9999 !important;
+      min-width: 200px !important;
+      max-width: 250px !important;
+      min-height: 50px !important;
+      max-height: 70px !important;
+      font-size: 14px !important;
+      padding: 8px 12px !important;
+      line-height: 1.2 !important;
+    }
+    .toast-error {
+      background: rgba(220, 53, 69, 0.9) !important;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff !important;
+      font-family: 'Rubik', sans-serif;
+      z-index: 9999 !important;
+      min-width: 200px !important;
+      max-width: 250px !important;
+      min-height: 50px !important;
+      max-height: 70px !important;
+      font-size: 14px !important;
+      padding: 8px 12px !important;
+      line-height: 1.2 !important;
+    }
+    .toast-info {
+      background: rgba(0, 123, 255, 0.9) !important;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff !important;
+      font-family: 'Rubik', sans-serif;
+      z-index: 9999 !important;
+      min-width: 200px !important;
+      max-width: 250px !important;
+      min-height: 50px !important;
+      max-height: 70px !important;
+      font-size: 14px !important;
+      padding: 8px 12px !important;
+      line-height: 1.2 !important;
+    }
+    .toast-title {
+      font-weight: bold;
+      color: #ffffff !important;
+      font-size: 16px !important;
+    }
+    .toast-message {
+      color: #ffffff !important;
+      font-size: 14px !important;
+    }
+    .toast-progress {
+      background: rgba(255, 255, 255, 0.8) !important;
+      height: 4px !important;
+    }
+    .toast-container {
+      z-index: 9999 !important;
+      padding: 8px !important;
+    }
   }
   html {
     scroll-behavior: smooth;
@@ -1082,8 +1644,6 @@ styleSheet.textContent = tailwindStyles;
 document.head.appendChild(styleSheet);
 
 // Bootstrap the Application with Error Handling
-// Removed process.env check; assuming development mode for simplicity
-// For production, use environment.ts and Angular CLI build configurations
 function bootstrapApp(): void {
   platformBrowserDynamic()
     .bootstrapModule(AppModule)
@@ -1093,7 +1653,7 @@ function bootstrapApp(): void {
 
       const token = localStorage.getItem('token');
       const currentPath = window.location.pathname;
-      if (token && (currentPath === '/login' || currentPath === '/signup')) {
+      if (token && (currentPath === '/login' || currentPath === '/signup' || currentPath === '/reset-password' || currentPath === '/forgot-password')) {
         console.log('User is logged in, redirecting from', currentPath, 'to /code');
         router.navigate(['/code']);
       }
@@ -1101,7 +1661,7 @@ function bootstrapApp(): void {
       router.events.subscribe(event => {
         if (event instanceof NavigationEnd) {
           const updatedToken = localStorage.getItem('token');
-          if (updatedToken && (event.url === '/login' || event.url === '/signup')) {
+          if (updatedToken && (event.url === '/login' || event.url === '/signup' || event.url === '/reset-password' || event.url === '/forgot-password')) {
             console.log('User is logged in, redirecting from', event.url, 'to /code');
             router.navigate(['/code']);
           }

@@ -50,6 +50,17 @@ const UserSchema = new mongoose.Schema({
     select: false,
     minlength: 6
   },
+  secretQuestion: {
+    type: String,
+    required: [true, 'Please provide a secret question'],
+    trim: true
+  },
+  secretAnswer: {
+    type: String,
+    required: [true, 'Please provide a secret answer'],
+    select: false,
+    trim: true
+  },
   provider: {
     type: String,
     enum: ['local', 'github'],
@@ -70,15 +81,57 @@ const UserSchema = new mongoose.Schema({
 });
 
 UserSchema.pre('save', async function(next) {
-  if (!this.isModified('password') || !this.password) {
-    return next();
+  if (this.isModified('password') && this.password) {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
   }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  if (this.isModified('secretAnswer') && this.secretAnswer) {
+    const salt = await bcrypt.genSalt(10);
+    this.secretAnswer = await bcrypt.hash(this.secretAnswer, salt);
+  }
   next();
 });
 
 const User = mongoose.model('User', UserSchema);
+
+// File Schema
+const FileSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  filename: {
+    type: String,
+    required: [true, 'Please provide a filename'],
+    trim: true
+  },
+  language: {
+    type: String,
+    required: [true, 'Please specify a language'],
+    enum: ['cpp', 'javascript', 'python', 'java']
+  },
+  code: {
+    type: String,
+    required: [true, 'Code content is required']
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+FileSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+const File = mongoose.model('File', FileSchema);
 
 // Passport Configuration
 passport.serializeUser((user, done) => {
@@ -111,7 +164,9 @@ passport.use(new GitHubStrategy({
           provider: 'github',
           email: profile.emails && profile.emails[0]?.value ? profile.emails[0].value : `${profile.id}@githubuser.com`,
           username: profile.username,
-          password: Math.random().toString(36).slice(-8)
+          password: Math.random().toString(36).slice(-8),
+          secretQuestion: 'Default question for GitHub users',
+          secretAnswer: Math.random().toString(36).slice(-8)
         });
       } else {
         user.providerId = profile.id;
@@ -148,14 +203,28 @@ const authRoutes = express.Router();
 
 authRoutes.post('/signup', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, secretQuestion, secretAnswer } = req.body;
+    if (!email || !password || !secretQuestion || !secretAnswer) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
     let user = await User.findOne({ email });
     if (user) {
       return res.status(400).json({ message: 'User already exists' });
     }
-    user = new User({ email, password, provider: 'local', username: email.split('@')[0] });
+    user = new User({
+      email,
+      password,
+      secretQuestion,
+      secretAnswer,
+      provider: 'local',
+      username: email.split('@')[0]
+    });
     await user.save();
-    const token = jwt.sign({ email: user.email, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { _id: user._id, email: user.email, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
     res.json({ token });
   } catch (error) {
     console.error('Signup error:', error);
@@ -165,20 +234,74 @@ authRoutes.post('/signup', async (req, res) => {
 
 authRoutes.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email }).select('+password');
+    const { email, password, secretAnswer } = req.body;
+    if (!email || !password || !secretAnswer) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    const user = await User.findOne({ email }).select('+password +secretAnswer');
     if (!user || !user.password) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
+    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    const isAnswerMatch = await bcrypt.compare(secretAnswer, user.secretAnswer);
+    if (!isPasswordMatch || !isAnswerMatch) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
-    const token = jwt.sign({ email: user.email, username: user.username || email.split('@')[0] }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { _id: user._id, email: user.email, username: user.username || email.split('@')[0] },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
     res.json({ token });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Login failed: ' + error.message });
+  }
+});
+
+authRoutes.post('/reset-password', async (req, res) => {
+  try {
+    const { email, secretAnswer, newPassword } = req.body;
+    if (!email || !secretAnswer || !newPassword) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    const user = await User.findOne({ email }).select('+secretAnswer +password');
+    if (!user) {
+      return res.status(400).json({ message: 'User not found' });
+    }
+    const isAnswerMatch = await bcrypt.compare(secretAnswer, user.secretAnswer);
+    if (!isAnswerMatch) {
+      return res.status(400).json({ message: 'Invalid secret answer' });
+    }
+    user.password = newPassword;
+    await user.save();
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Password reset failed: ' + error.message });
+  }
+});
+
+authRoutes.post('/forgot-password', async (req, res) => {
+  try {
+    const { email, secretAnswer } = req.body;
+    if (!email || !secretAnswer) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    const user = await User.findOne({ email }).select('+secretAnswer');
+    if (!user) {
+      return res.status(400).json({ message: 'User not found' });
+    }
+    const isAnswerMatch = await bcrypt.compare(secretAnswer, user.secretAnswer);
+    if (!isAnswerMatch) {
+      return res.status(400).json({ message: 'Invalid secret answer' });
+    }
+    // Note: In a production environment, you would send a reset link or temporary password via email
+    // For this example, we'll indicate that the user can proceed to reset
+    res.json({ message: 'Secret answer verified. Please proceed to reset your password.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Password retrieval failed: ' + error.message });
   }
 });
 
@@ -193,7 +316,7 @@ authRoutes.get('/github/callback',
         return res.redirect('http://localhost:4200/auth/callback?error=GitHub authentication failed: No user found');
       }
       const token = jwt.sign(
-        { email: req.user.email, username: req.user.username },
+        { _id: req.user._id, email: req.user.email, username: req.user.username },
         process.env.JWT_SECRET,
         { expiresIn: '1h' }
       );
@@ -204,6 +327,60 @@ authRoutes.get('/github/callback',
     }
   }
 );
+
+// File Routes
+const fileRoutes = express.Router();
+
+fileRoutes.post('/save', auth, async (req, res) => {
+  try {
+    const { filename, language, code, fileId } = req.body;
+    const userId = req.user._id;
+
+    if (!filename || !language || !code) {
+      return res.status(400).json({ message: 'Filename, language, and code are required' });
+    }
+
+    if (fileId) {
+      const file = await File.findOneAndUpdate(
+        { _id: fileId, userId },
+        { filename, language, code },
+        { new: true }
+      );
+      if (!file) return res.status(404).json({ message: 'File not found or not authorized' });
+      res.json({ fileId: file._id, message: 'File updated successfully' });
+    } else {
+      const file = new File({ userId, filename, language, code });
+      await file.save();
+      res.json({ fileId: file._id, message: 'File saved successfully' });
+    }
+  } catch (error) {
+    console.error('Error saving file:', error);
+    res.status(500).json({ message: 'Failed to save file: ' + error.message });
+  }
+});
+
+fileRoutes.get('/list', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const files = await File.find({ userId }).sort({ updatedAt: -1 });
+    res.json(files);
+  } catch (error) {
+    console.error('Error fetching files:', error);
+    res.status(500).json({ message: 'Failed to fetch files: ' + error.message });
+  }
+});
+
+fileRoutes.get('/:fileId', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const file = await File.findOne({ _id: req.params.fileId, userId });
+    if (!file) return res.status(404).json({ message: 'File not found or not authorized' });
+    res.json(file);
+  } catch (error) {
+    console.error('Error fetching file:', error);
+    res.status(500).json({ message: 'Failed to fetch file: ' + error.message });
+  }
+});
 
 // Piston API Configuration
 const PISTON_API_URL = 'https://emkc.org/api/v2/piston/execute';
@@ -292,6 +469,7 @@ app.post('/api/run', auth, async (req, res) => {
 
 // Use Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/files', fileRoutes);
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
