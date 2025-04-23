@@ -12,7 +12,7 @@ import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { jwtDecode } from 'jwt-decode';
 import { FontAwesomeModule, FaIconLibrary } from '@fortawesome/angular-fontawesome';
-import { faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle } from '@fortawesome/free-solid-svg-icons';
+import { faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle,faTrashCan } from '@fortawesome/free-solid-svg-icons';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Title } from '@angular/platform-browser';
 import { enableProdMode } from '@angular/core';
@@ -586,7 +586,8 @@ class AuthComponent implements AfterViewInit, OnInit {
     <div class="flex flex-col items-center justify-center w-full max-w-6xl p-4">
       <div class="flex items-center justify-between w-full mb-4">
         <div class="text-4xl font-bold">
-          <span class="gradient-text">CodeCraft</span>
+         <a routerLink="/" class="gradient-text">CodeCraft</a>
+          <!-- <span class="gradient-text">CodeCraft</span> -->
         </div>
         <div class="flex items-center gap-4">
           <select 
@@ -616,21 +617,26 @@ class AuthComponent implements AfterViewInit, OnInit {
             <div *ngIf="isLoadingFiles" class="text-white">Loading files...</div>
             <div *ngIf="!isLoadingFiles && savedFiles.length === 0" class="text-white">No saved files</div>
             <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2">
-              <li *ngFor="let file of savedFiles" 
-                  class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
-                  [class.bg-white]="selectedFileId === file._id"
-                  [class.bg-opacity-10]="selectedFileId === file._id"
-                  (click)="loadFile(file._id)"
-              >
-                <div class="flex items-center gap-2">
-                  <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
-                  <span>{{ file.filename }}</span>
-                </div>
-                <div class="text-sm text-gray-400">
-                  {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
-                </div>
-              </li>
-            </ul>
+  <li *ngFor="let file of savedFiles" 
+      class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
+      [class.bg-white]="selectedFileId === file._id"
+      [class.bg-opacity-10]="selectedFileId === file._id">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2" (click)="loadFile(file._id)">
+        <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
+        <span>{{ file.filename }}</span>
+      </div>
+      <button (click)="deleteFile(file._id)" 
+              class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
+              title="Delete File">
+        🗑️ Delete
+      </button>
+    </div>
+    <div class="text-sm text-gray-400">
+      {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
+    </div>
+  </li>
+</ul>
           </div>
         </div>
         <div class="w-3/4 flex flex-col">
@@ -770,7 +776,70 @@ public class Main {
         return '';
     }
   }
-
+  deleteFile(fileId: string) {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+  
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    this.http.delete(`${this.apiUrl}/files/delete/${fileId}`, {
+      headers: { 'x-auth-token': token }
+    }).pipe(
+      catchError(error => {
+        console.error('Delete file error:', error); // Debug backend error
+        if (error.status === 401) {
+          this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          this.router.navigate(['/login']);
+        } else {
+          this.toastr.error(error.error?.message || 'Failed to delete file. Please try again.', 'Error');
+          // Re-fetch files to restore UI state
+          this.fetchSavedFiles();
+        }
+        return throwError(() => error);
+      })
+    ).subscribe({
+      next: () => {
+        console.log(`File ${fileId} deleted successfully from backend`); // Debug success
+        // Update savedFiles
+        this.savedFiles = this.savedFiles.filter(file => file._id !== fileId);
+  
+        // Reset editor and state if the deleted file is selected
+        if (this.selectedFileId === fileId) {
+          console.log('Resetting editor for deleted file:', fileId); // Debug
+          this.selectedFileId = null;
+          this.filename = '';
+          this.code = this.getDefaultCode(this.selectedLanguage) || '// Start coding here...';
+          if (this.editor) {
+            try {
+              this.editor.setValue(this.code);
+              this.editor.updateOptions({ readOnly: false }); // Ensure editor is editable
+              this.editor.focus(); // Force UI refresh
+              console.log('Editor content set to:', this.code); // Debug
+            } catch (err) {
+              console.error('Error updating Monaco Editor:', err);
+              this.toastr.error('Failed to reset editor content.', 'Error');
+            }
+          } else {
+            console.warn('Monaco Editor instance not found'); // Debug
+            this.toastr.warning('Editor instance not available. Please refresh the page.', 'Warning');
+          }
+        }
+  
+        this.toastr.success('File deleted successfully!', 'Success');
+        // Re-fetch files to ensure UI syncs with backend
+        this.fetchSavedFiles();
+      },
+      error: (err) => {
+        console.error('Unexpected error during file deletion:', err); // Debug
+      }
+    });
+  }
   onLanguageChange() {
     this.code = this.getDefaultCode(this.selectedLanguage);
     this.filename = '';
@@ -1088,72 +1157,62 @@ public class Main {
   selector: 'app-landing',
   template: `
     <section class="hero relative flex flex-col md:flex-row items-center justify-between min-h-screen p-4 z-10" id="hero">
-      <div class="flex-1 text-left max-w-xl p-4">
-        <h1 class="text-5xl md:text-6xl font-bold gradient-text mb-4">Code Anywhere, Anytime with Ease</h1>
-        <p class="text-xl md:text-2xl text-gray-300 mb-8">
-          Unleash your creativity with our powerful, browser-based code editor—no downloads, no hassle. Write, edit, and run code in real-time.
-        </p>
-        <div class="flex gap-4 mb-4">
-          <a 
-            [routerLink]="['/signup']" 
-            class="glassmorphism-button flex-1 flex items-center justify-center gap-2 py-3 px-6 text-lg"
-          >
-            <span class="text-black">Start Coding Now</span>
-          </a>
-          <a 
-            href="#languages" 
-            (click)="scrollToLanguages($event)" 
-            class="glassmorphism-button flex-1 flex items-center justify-center gap-2 py-3 px-6 text-lg"
-          >
-            <span class="text-black">Explore Languages</span>
-          </a>
-        </div>
-        <p class="text-sm text-gray-400">Free to use • No setup required</p>
-      </div>
-      <div class="flex-1 w-full max-w-[800px] h-[800px]">
-        <canvas #modelCanvas class="w-full h-full"></canvas>
-      </div>
-    </section>
-    <section class="languages relative py-16 px-4 z-10" id="languages">
-      <h2 class="text-4xl font-bold text-white text-center mb-8">Languages You’ll Love to Code In</h2>
-      <p class="text-lg text-gray-300 text-center mb-12 max-w-3xl mx-auto">
-        Our browser-based editor supports a wide range of programming languages, empowering you to build everything from web apps to algorithms, right in your browser.
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">JavaScript</h3>
-          <p class="text-gray-300">Build dynamic web experiences with the web’s most popular language.</p>
-        </div>
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">Python</h3>
-          <p class="text-gray-300">Perfect for scripting, data analysis, or learning to code.</p>
-        </div>
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">HTML/CSS</h3>
-          <p class="text-gray-300">Craft stunning web pages with live previews as you type.</p>
-        </div>
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">Java</h3>
-          <p class="text-gray-300">Write robust, object-oriented code in a sandboxed environment.</p>
-        </div>
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">C++</h3>
-          <p class="text-gray-300">Tackle performance-heavy projects with our optimized editor.</p>
-        </div>
-        <div class="glassmorphism p-6 rounded-xl">
-          <h3 class="text-2xl font-bold text-white mb-2">TypeScript</h3>
-          <p class="text-gray-300">Enhance JavaScript with type safety and modern tooling.</p>
-        </div>
-      </div>
-      <div class="text-center mt-12">
-        <button 
-          (click)="scrollToTop()" 
-          class="glassmorphism-button flex items-center justify-center gap-2 py-3 px-6 text-lg mx-auto"
-        >
-          <span class="text-black">Back to Top</span>
-        </button>
-      </div>
-    </section>
+  <div class="flex-1 text-left max-w-xl p-4">
+    <h1 class="text-5xl md:text-6xl font-bold gradient-text mb-4">Code Anywhere, Anytime with Ease</h1>
+    <p class="text-xl md:text-2xl text-gray-300 mb-8">
+      Unleash your creativity with our powerful, browser-based code editor—no downloads, no hassle. Write, edit, and run code in real-time.
+    </p>
+    <div class="flex gap-4 mb-4">
+      <a [routerLink]="['/signup']" class="glassmorphism-button flex-1 flex items-center justify-center gap-2 py-3 px-6 text-lg">
+        <span class="text-black">Start Coding Now</span>
+      </a>
+      <a href="#languages" (click)="scrollToLanguages($event)" class="glassmorphism-button flex-1 flex items-center justify-center gap-2 py-3 px-6 text-lg">
+        <span class="text-black">Explore Languages</span>
+      </a>
+    </div>
+    <p class="text-sm text-gray-400">Free to use • No setup required</p>
+  </div>
+  <div class="flex-1 w-full max-w-[800px] h-[800px]">
+    <canvas #modelCanvas class="w-full h-full"></canvas>
+  </div>
+</section>
+<section class="languages relative py-16 px-4 z-10" id="languages">
+  <h2 class="text-4xl font-bold text-white text-center mb-8">Languages You’ll Love to Code In</h2>
+  <p class="text-lg text-gray-300 text-center mb-12 max-w-3xl mx-auto">
+    Our browser-based editor supports a wide range of programming languages, empowering you to build everything from web apps to algorithms, right in your browser.
+  </p>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">JavaScript</h3>
+      <p class="text-gray-300">Build dynamic web experiences with the web’s most popular language.</p>
+    </div>
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">Python</h3>
+      <p class="text-gray-300">Perfect for scripting, data analysis, or learning to code.</p>
+    </div>
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">HTML/CSS</h3>
+      <p class="text-gray-300">Craft stunning web pages with live previews as you type.</p>
+    </div>
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">Java</h3>
+      <p class="text-gray-300">Write robust, object-oriented code in a sandboxed environment.</p>
+    </div>
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">C++</h3>
+      <p class="text-gray-300">Tackle performance-heavy projects with our optimized editor.</p>
+    </div>
+    <div class="glassmorphism p-6 rounded-xl">
+      <h3 class="text-2xl font-bold text-white mb-2">TypeScript</h3>
+      <p class="text-gray-300">Enhance JavaScript with type safety and modern tooling.</p>
+    </div>
+  </div>
+  <div class="text-center mt-12">
+    <button (click)="scrollToTop()" class="glassmorphism-button flex items-center justify-center gap-2 py-3 px-6 text-lg mx-auto">
+      <span class="text-black">Back to Top</span>
+    </button>
+  </div>
+</section>
   `
 })
 class LandingComponent implements AfterViewInit {
@@ -1172,7 +1231,7 @@ class LandingComponent implements AfterViewInit {
   constructor(private router: Router, private titleService: Title) {
     this.titleService.setTitle('CodeCraft - Home');
   }
-
+  
   ngAfterViewInit() {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);

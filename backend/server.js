@@ -80,15 +80,24 @@ const UserSchema = new mongoose.Schema({
   }
 });
 
+// Bcrypt pre-save middleware for hashing password and secretAnswer
 UserSchema.pre('save', async function(next) {
   if (this.isModified('password') && this.password) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    console.log('Hashed password:', this.password);
   }
   if (this.isModified('secretAnswer') && this.secretAnswer) {
     const salt = await bcrypt.genSalt(10);
     this.secretAnswer = await bcrypt.hash(this.secretAnswer, salt);
+    console.log('Hashed secretAnswer:', this.secretAnswer);
   }
+  console.log('Saving user:', {
+    email: this.email,
+    password: this.isModified('password') ? '[hashed]' : this.password,
+    secretQuestion: this.secretQuestion,
+    secretAnswer: this.isModified('secretAnswer') ? '[hashed]' : this.secretAnswer
+  });
   next();
 });
 
@@ -159,14 +168,16 @@ passport.use(new GitHubStrategy({
       user = await User.findOne({ email: profile.emails && profile.emails[0]?.value });
       
       if (!user) {
+        const randomPassword = Math.random().toString(36).slice(-8);
+        const randomSecretAnswer = Math.random().toString(36).slice(-8);
         user = new User({
           providerId: profile.id,
           provider: 'github',
           email: profile.emails && profile.emails[0]?.value ? profile.emails[0].value : `${profile.id}@githubuser.com`,
           username: profile.username,
-          password: Math.random().toString(36).slice(-8),
+          password: randomPassword,
           secretQuestion: 'Default question for GitHub users',
-          secretAnswer: Math.random().toString(36).slice(-8)
+          secretAnswer: randomSecretAnswer
         });
       } else {
         user.providerId = profile.id;
@@ -204,11 +215,13 @@ const authRoutes = express.Router();
 authRoutes.post('/signup', async (req, res) => {
   try {
     const { email, password, secretQuestion, secretAnswer } = req.body;
+    console.log('Signup attempt:', { email, password, secretQuestion, secretAnswer });
     if (!email || !password || !secretQuestion || !secretAnswer) {
       return res.status(400).json({ message: 'All fields are required' });
     }
     let user = await User.findOne({ email });
     if (user) {
+      console.log('User already exists:', email);
       return res.status(400).json({ message: 'User already exists' });
     }
     user = new User({
@@ -220,6 +233,7 @@ authRoutes.post('/signup', async (req, res) => {
       username: email.split('@')[0]
     });
     await user.save();
+    console.log('User signed up:', { email, username: user.username });
     const token = jwt.sign(
       { _id: user._id, email: user.email, username: user.username },
       process.env.JWT_SECRET,
@@ -235,17 +249,27 @@ authRoutes.post('/signup', async (req, res) => {
 authRoutes.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log('Login attempt:', { email, password });
     if (!email || !password) {
+      console.log('Missing email or password:', { email, password });
       return res.status(400).json({ message: 'Email and password are required' });
     }
     const user = await User.findOne({ email }).select('+password');
-    if (!user || !user.password) {
+    if (!user) {
+      console.log('User not found:', email);
       return res.status(400).json({ message: 'Invalid credentials' });
+    }
+    if (!user.password) {
+      console.log('User has no password set:', email);
+      return res.status(400).json({ message: 'User account is corrupted. Please reset your password.' });
     }
     const isPasswordMatch = await bcrypt.compare(password, user.password);
+    console.log('Password match result:', isPasswordMatch);
     if (!isPasswordMatch) {
+      console.log('Password mismatch for:', email);
       return res.status(400).json({ message: 'Invalid credentials' });
     }
+    console.log('Login successful:', email);
     const token = jwt.sign(
       { _id: user._id, email: user.email, username: user.username || email.split('@')[0] },
       process.env.JWT_SECRET,
@@ -261,20 +285,27 @@ authRoutes.post('/login', async (req, res) => {
 authRoutes.post('/forgot-password', async (req, res) => {
   try {
     const { email, secretQuestion, secretAnswer } = req.body;
+    console.log('Forgot password attempt:', { email, secretQuestion, secretAnswer });
     if (!email || !secretQuestion || !secretAnswer) {
+      console.log('Missing fields:', { email, secretQuestion, secretAnswer });
       return res.status(400).json({ message: 'All fields are required' });
     }
     const user = await User.findOne({ email }).select('+secretAnswer');
     if (!user) {
+      console.log('User not found:', email);
       return res.status(400).json({ message: 'User not found' });
     }
     if (user.secretQuestion !== secretQuestion) {
+      console.log('Secret question mismatch:', { input: secretQuestion, stored: user.secretQuestion });
       return res.status(400).json({ message: 'Invalid secret question' });
     }
     const isAnswerMatch = await bcrypt.compare(secretAnswer, user.secretAnswer);
+    console.log('Secret answer match result:', isAnswerMatch);
     if (!isAnswerMatch) {
+      console.log('Secret answer mismatch for:', email);
       return res.status(400).json({ message: 'Invalid secret answer' });
     }
+    console.log('Secret answer verified for:', email);
     res.json({ message: 'Secret answer verified. Please proceed to reset your password.', email });
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -284,17 +315,25 @@ authRoutes.post('/forgot-password', async (req, res) => {
 
 authRoutes.post('/reset-password', async (req, res) => {
   try {
-    const email = req.body.email || req.query.email;
-    const { newPassword } = req.body;
+    const { email, newPassword } = req.body;
+    console.log('Reset password attempt:', { email, newPassword });
     if (!email || !newPassword) {
+      console.log('Missing email or newPassword:', { email, newPassword });
       return res.status(400).json({ message: 'Email and new password are required' });
     }
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
+      console.log('User not found:', email);
       return res.status(400).json({ message: 'User not found' });
     }
     user.password = newPassword;
     await user.save();
+    console.log('Password reset successful:', { email });
+    const updatedUser = await User.findOne({ email }).select('+password');
+    console.log('Verified updated user:', {
+      email: updatedUser.email,
+      password: updatedUser.password ? '[hashed]' : 'undefined'
+    });
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
     console.error('Reset password error:', error);
@@ -379,6 +418,26 @@ fileRoutes.get('/:fileId', auth, async (req, res) => {
   }
 });
 
+fileRoutes.delete('/delete/:fileId', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const fileId = req.params.fileId;
+    console.log('Delete file attempt:', { fileId, userId });
+
+    const file = await File.findOneAndDelete({ _id: fileId, userId });
+    if (!file) {
+      console.log('File not found or not authorized:', { fileId, userId });
+      return res.status(404).json({ message: 'File not found or not authorized' });
+    }
+
+    console.log('File deleted successfully:', { fileId, filename: file.filename });
+    res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ message: 'Failed to delete file: ' + error.message });
+  }
+});
+
 // Piston API Configuration
 const PISTON_API_URL = 'https://emkc.org/api/v2/piston/execute';
 
@@ -410,78 +469,6 @@ async function fetchLanguageVersions() {
 fetchLanguageVersions();
 
 // Code Execution Endpoint
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
-
-  console.log('Login attempt for email:', email, 'password provided:', !!password);
-
-  // Validate input
-  if (!email || !password) {
-    console.log('Missing email or password:', { email, password });
-    return res.status(400).json({ message: 'Email and password are required' });
-  }
-
-  try {
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      console.log('User not found for login:', email);
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    if (!user.password) {
-      console.log('User password is undefined for email:', email);
-      return res.status(400).json({ message: 'User account is corrupted. Please reset your password.' });
-    }
-
-    console.log('Comparing password for user:', email, 'stored hash:', user.password);
-    const isMatch = await bcrypt.compare(password, user.password);
-    console.log('Password match result:', isMatch);
-
-    if (!isMatch) {
-      console.log('Password mismatch for email:', email);
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    const payload = { userId: user._id, email: user.email };
-    const token = jwt.sign(payload, 'your_jwt_secret', { expiresIn: '1h' });
-
-    res.json({ token });
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-app.post('/api/auth/reset-password', async (req, res) => {
-  const { email, newPassword } = req.body;
-
-  // Validate input
-  if (!email || !newPassword) {
-    console.log('Missing email or newPassword:', { email, newPassword });
-    return res.status(400).json({ message: 'Email and new password are required' });
-  }
-
-  try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      console.log('User not found for email:', email);
-      return res.status(400).json({ message: 'User not found' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    console.log('Before update - User password:', user.password);
-    user.password = hashedPassword;
-    await user.save();
-    console.log('After update - User password:', user.password);
-    console.log('User saved successfully for email:', email);
-
-    res.json({ message: 'Password reset successful' });
-  } catch (err) {
-    console.error('Error in reset-password:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
 app.post('/api/run', auth, async (req, res) => {
   const { code, language, input } = req.body;
 
