@@ -1,7 +1,7 @@
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
 import { NgModule, Component, ViewChild, ElementRef, AfterViewInit, OnInit } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
-import { RouterModule, Routes, Router, NavigationEnd } from '@angular/router';
+import { RouterModule, Routes, Router, NavigationEnd, ActivatedRoute } from '@angular/router';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { trigger, state, style, animate, transition } from '@angular/animations';
 import { FormsModule } from '@angular/forms';
@@ -78,15 +78,18 @@ interface SavedFile {
                 </div>
                 <div class="relative">
                   <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
-                  <input 
-                    type="text" 
-                    placeholder="Secret Question (e.g., What is your pet's name?)" 
+                  <select 
                     class="glassmorphism-input w-full pl-12 pr-4 py-3"
                     [(ngModel)]="secretQuestion"
                     name="secretQuestion"
                     required
-                    autocomplete="off"
                   >
+                    <option value="" disabled selected>Select a secret question</option>
+                    <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                    <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+                    <option value="What is the name of your favorite teacher?">What is the name of your favorite teacher?</option>
+                    <option value="What city were you born in?">What city were you born in?</option>
+                  </select>
                 </div>
                 <div class="relative">
                   <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
@@ -157,18 +160,6 @@ interface SavedFile {
                     autocomplete="off"
                   >
                 </div>
-                <div class="relative">
-                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
-                  <input 
-                    type="text" 
-                    placeholder="Secret Answer" 
-                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
-                    [(ngModel)]="secretAnswer"
-                    name="secretAnswer"
-                    required
-                    autocomplete="off"
-                  >
-                </div>
                 <button 
                   type="submit" 
                   class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
@@ -186,57 +177,45 @@ interface SavedFile {
               </div>
             </div>
             <div *ngIf="isResetPasswordRoute">
-              <h2 class="text-3xl font-bold text-white mb-6 text-center">Reset Password</h2>
-              <form (ngSubmit)="onResetPasswordSubmit()" class="space-y-4">
-                <div class="relative">
-                  <fa-icon [icon]="['fas', 'envelope']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
-                  <input 
-                    type="email" 
-                    placeholder="m@example.com" 
-                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
-                    [(ngModel)]="email"
-                    name="email"
-                    required
-                    autocomplete="off"
-                  >
-                </div>
-                <div class="relative">
-                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
-                  <input 
-                    type="text" 
-                    placeholder="Secret Answer" 
-                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
-                    [(ngModel)]="secretAnswer"
-                    name="secretAnswer"
-                    required
-                    autocomplete="off"
-                  >
-                </div>
-                <div class="relative">
-                  <fa-icon [icon]="['fas', 'lock']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
-                  <input 
-                    type="password" 
-                    placeholder="New Password" 
-                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
-                    [(ngModel)]="password"
-                    name="password"
-                    required
-                    autocomplete="off"
-                  >
-                </div>
-                <button 
-                  type="submit" 
-                  class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
-                >
-                  <span class="text-black">Reset Password</span>
-                  <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
-                </button>
-              </form>
-              <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
-              <div class="text-center mt-4">
-                <a routerLink="/login" class="text-gray-400 hover:text-white">Back to Login</a>
-              </div>
-            </div>
+  <h2 class="text-3xl font-bold text-white mb-6 text-center">Reset Password</h2>
+  <form (ngSubmit)="onResetPasswordSubmit()" class="space-y-4">
+    <div class="relative">
+      <fa-icon [icon]="['fas', 'envelope']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+      <input 
+        type="email" 
+        placeholder="m@example.com" 
+        class="glassmorphism-input w-full pl-12 pr-4 py-3"
+        [(ngModel)]="email"
+        name="email"
+        required
+        autocomplete="off"
+      >
+    </div>
+    <div class="relative">
+      <fa-icon [icon]="['fas', 'lock']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+      <input 
+        type="password" 
+        placeholder="New Password" 
+        class="glassmorphism-input w-full pl-12 pr-4 py-3"
+        [(ngModel)]="password"
+        name="newPassword"
+        required
+        autocomplete="off"
+      >
+    </div>
+    <button 
+      type="submit" 
+      class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
+    >
+      <span class="text-black">Reset Password</span>
+      <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
+    </button>
+  </form>
+  <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
+  <div class="text-center mt-4">
+    <a routerLink="/login" class="text-gray-400 hover:text-white">Back to Login</a>
+  </div>
+</div>
             <div *ngIf="isForgotPasswordRoute">
               <h2 class="text-3xl font-bold text-white mb-6 text-center">Forgot Password</h2>
               <form (ngSubmit)="onForgotPasswordSubmit()" class="space-y-4">
@@ -254,6 +233,21 @@ interface SavedFile {
                 </div>
                 <div class="relative">
                   <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
+                  <select 
+                    class="glassmorphism-input w-full pl-12 pr-4 py-3"
+                    [(ngModel)]="secretQuestion"
+                    name="secretQuestion"
+                    required
+                  >
+                    <option value="" disabled selected>Select a secret question</option>
+                    <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                    <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+                    <option value="What is the name of your favorite teacher?">What is the name of your favorite teacher?</option>
+                    <option value="What city were you born in?">What city were you born in?</option>
+                  </select>
+                </div>
+                <div class="relative">
+                  <fa-icon [icon]="['fas', 'question-circle']" class="absolute left-4 top-1/2 -translate-y-1/2 text-xl glassmorphism-icon"></fa-icon>
                   <input 
                     type="text" 
                     placeholder="Secret Answer" 
@@ -268,12 +262,11 @@ interface SavedFile {
                   type="submit" 
                   class="glassmorphism-button w-full flex items-center justify-center gap-2 py-3"
                 >
-                  <span class="text-black">Retrieve Password</span>
+                  <span class="text-black">Verify Answer</span>
                   <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
                 </button>
               </form>
               <div class="text-center mt-4 text-red-500" *ngIf="errorMessage">{{errorMessage}}</div>
-              <div class="text-center mt-4 text-green-500" *ngIf="retrievedPassword">Your password is: {{retrievedPassword}}</div>
               <div class="text-center mt-4">
                 <a routerLink="/login" class="text-gray-400 hover:text-white">Back to Login</a>
               </div>
@@ -317,7 +310,6 @@ class AuthComponent implements AfterViewInit, OnInit {
   password: string = '';
   secretQuestion: string = '';
   secretAnswer: string = '';
-  retrievedPassword: string = '';
   isSignupRoute: boolean = false;
   isLoginRoute: boolean = false;
   isResetPasswordRoute: boolean = false;
@@ -328,7 +320,8 @@ class AuthComponent implements AfterViewInit, OnInit {
     private router: Router, 
     private http: HttpClient, 
     private titleService: Title,
-    private toastr: ToastrService
+    private toastr: ToastrService,
+    private activatedRoute: ActivatedRoute
   ) {
     console.log('AuthComponent initialized, ToastrService injected');
     setTimeout(() => {
@@ -349,12 +342,14 @@ class AuthComponent implements AfterViewInit, OnInit {
       } else if (this.isForgotPasswordRoute) {
         this.titleService.setTitle('CodeCraft - Forgot Password');
       }
-      this.email = '';
       this.password = '';
       this.secretQuestion = '';
       this.secretAnswer = '';
       this.errorMessage = '';
-      this.retrievedPassword = '';
+    });
+    // Subscribe to query params to get email
+    this.activatedRoute.queryParams.subscribe(params => {
+      this.email = params['email'] || this.email;
     });
   }
 
@@ -455,16 +450,16 @@ class AuthComponent implements AfterViewInit, OnInit {
     return this.http.post(`${this.apiUrl}/signup`, { email, password, secretQuestion, secretAnswer });
   }
 
-  private login(email: string, password: string, secretAnswer: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/login`, { email, password, secretAnswer });
+  private login(email: string, password: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/login`, { email, password });
   }
 
-  private resetPassword(email: string, secretAnswer: string, newPassword: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/reset-password`, { email, secretAnswer, newPassword });
+  private resetPassword(email: string, newPassword: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/reset-password`, { email, newPassword });
   }
 
-  private forgotPassword(email: string, secretAnswer: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/forgot-password`, { email, secretAnswer });
+  private forgotPassword(email: string, secretQuestion: string, secretAnswer: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/forgot-password`, { email, secretQuestion, secretAnswer });
   }
 
   loginWithGithub() {
@@ -523,7 +518,7 @@ class AuthComponent implements AfterViewInit, OnInit {
 
   onLoginSubmit() {
     console.log('Login submitted:', this.email);
-    this.login(this.email, this.password, this.secretAnswer).subscribe({
+    this.login(this.email, this.password).subscribe({
       next: (response) => {
         localStorage.setItem('token', response.token);
         const decoded: any = jwtDecode(response.token);
@@ -532,7 +527,6 @@ class AuthComponent implements AfterViewInit, OnInit {
         this.errorMessage = '';
         this.email = '';
         this.password = '';
-        this.secretAnswer = '';
         this.toastr.success('Login successful! Ready to code!', 'Success');
         this.router.navigate(['/code']);
       },
@@ -546,11 +540,15 @@ class AuthComponent implements AfterViewInit, OnInit {
 
   onResetPasswordSubmit() {
     console.log('Reset password submitted:', this.email);
-    this.resetPassword(this.email, this.secretAnswer, this.password).subscribe({
+    if (!this.email) {
+      this.errorMessage = 'Email is required.';
+      this.toastr.error(this.errorMessage, 'Error');
+      return;
+    }
+    this.resetPassword(this.email, this.password).subscribe({
       next: (response) => {
         this.errorMessage = '';
         this.email = '';
-        this.secretAnswer = '';
         this.password = '';
         this.toastr.success('Password reset successful!', 'Success');
         this.router.navigate(['/login']);
@@ -565,14 +563,15 @@ class AuthComponent implements AfterViewInit, OnInit {
 
   onForgotPasswordSubmit() {
     console.log('Forgot password submitted:', this.email);
-    this.forgotPassword(this.email, this.secretAnswer).subscribe({
+    this.forgotPassword(this.email, this.secretQuestion, this.secretAnswer).subscribe({
       next: (response) => {
-        this.retrievedPassword = response.password;
         this.errorMessage = '';
-        this.toastr.success('Password retrieved successfully!', 'Success');
+        this.toastr.success('Secret answer verified! Proceed to reset password.', 'Success');
+        // Pass email as query parameter
+        this.router.navigate(['/reset-password'], { queryParams: { email: this.email } });
       },
       error: (error) => {
-        this.errorMessage = error.error?.message || 'Password retrieval failed';
+        this.errorMessage = error.error?.message || 'Secret answer verification failed';
         this.toastr.error(this.errorMessage, 'Error');
         console.error('Forgot password error:', error);
       }
@@ -1015,7 +1014,6 @@ public class Main {
         fontSize: 23
       });
 
-      // Register multiple languages
       const languages = [
         {
           id: 'cpp',
@@ -1278,7 +1276,7 @@ class LandingComponent implements AfterViewInit {
       <nav *ngIf="router.url !== '/code'" class="relative z-10 flex items-center justify-between p-4 bg-transparent">
         <div class="flex items-center justify-between w-full">
           <div class="text-3xl font-bold">
-            <span class="gradient-text">CodeCraft</span>
+            <a routerLink="/" class="gradient-text">CodeCraft</a>
           </div>
           <div class="flex items-center gap-6">
             <span *ngIf="isLoggedIn" class="text-xl text-white">{{ username }}</span>
@@ -1564,7 +1562,6 @@ const tailwindStyles = `
       -webkit-text-fill-color: transparent;
       font-family: 'Rubik', sans-serif;
     }
-    /* Toastr custom styles */
     .toast-success {
       background: rgba(40, 167, 69, 0.9) !important;
       backdrop-filter: blur(10px);
@@ -1631,7 +1628,7 @@ const tailwindStyles = `
   html {
     scroll-behavior: smooth;
   }
-  h2, input {
+  h2, input, select {
     font-family: 'Rubik', sans-serif !important;
     color: #ffffff !important;
   }
