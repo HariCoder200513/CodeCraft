@@ -1190,10 +1190,7 @@ public class Main {
       <h3 class="text-2xl font-bold text-white mb-2">Python</h3>
       <p class="text-gray-300">Perfect for scripting, data analysis, or learning to code.</p>
     </div>
-    <div class="glassmorphism p-6 rounded-xl">
-      <h3 class="text-2xl font-bold text-white mb-2">HTML/CSS</h3>
-      <p class="text-gray-300">Craft stunning web pages with live previews as you type.</p>
-    </div>
+    
     <div class="glassmorphism p-6 rounded-xl">
       <h3 class="text-2xl font-bold text-white mb-2">Java</h3>
       <p class="text-gray-300">Write robust, object-oriented code in a sandboxed environment.</p>
@@ -1202,10 +1199,7 @@ public class Main {
       <h3 class="text-2xl font-bold text-white mb-2">C++</h3>
       <p class="text-gray-300">Tackle performance-heavy projects with our optimized editor.</p>
     </div>
-    <div class="glassmorphism p-6 rounded-xl">
-      <h3 class="text-2xl font-bold text-white mb-2">TypeScript</h3>
-      <p class="text-gray-300">Enhance JavaScript with type safety and modern tooling.</p>
-    </div>
+    
   </div>
   <div class="text-center mt-12">
     <button (click)="scrollToTop()" class="glassmorphism-button flex items-center justify-center gap-2 py-3 px-6 text-lg mx-auto">
