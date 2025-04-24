@@ -30,12 +30,49 @@ const connectDB = async () => {
       useUnifiedTopology: true,
     });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+
+    // Create admin user if it doesn't exist
+    const adminEmail = 'admin@codecraft.com';
+    const adminExists = await User.findOne({ email: adminEmail });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash('Admin123', 10);
+      const adminUser = new User({
+        email: adminEmail,
+        password: hashedPassword,
+        secretQuestion: 'What is your role?',
+        secretAnswer: 'Admin',
+        username: 'admin',
+        role: 'admin',
+        provider: 'local'
+      });
+      await adminUser.save();
+      console.log(`Admin user created: ${adminEmail}`);
+    } else {
+      console.log(`Admin user already exists: ${adminEmail}`);
+    }
   } catch (error) {
     console.error(`Database connection error: ${error.message}`);
     process.exit(1);
   }
 };
 connectDB();
+
+const adminAuth = async (req, res, next) => {
+  const token = req.header('x-auth-token');
+  if (!token) {
+    return res.status(401).json({ message: 'No token, authorization denied' });
+  }
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied: Admins only' });
+    }
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Token is not valid' });
+  }
+};
 
 // User Schema
 const UserSchema = new mongoose.Schema({
@@ -74,12 +111,16 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
   createdAt: {
     type: Date,
     default: Date.now
   }
 });
-
 // Bcrypt pre-save middleware for hashing password and secretAnswer
 UserSchema.pre('save', async function(next) {
   if (this.isModified('password') && this.password) {
@@ -230,12 +271,13 @@ authRoutes.post('/signup', async (req, res) => {
       secretQuestion,
       secretAnswer,
       provider: 'local',
-      username: email.split('@')[0]
+      username: email.split('@')[0],
+      role: 'user' // Default role for new users
     });
     await user.save();
-    console.log('User signed up:', { email, username: user.username });
+    console.log('User signed up:', { email, username: user.username, role: user.role });
     const token = jwt.sign(
-      { _id: user._id, email: user.email, username: user.username },
+      { _id: user._id, email: user.email, username: user.username, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
@@ -243,6 +285,42 @@ authRoutes.post('/signup', async (req, res) => {
   } catch (error) {
     console.error('Signup error:', error);
     res.status(500).json({ message: 'Signup failed: ' + error.message });
+  }
+});
+
+authRoutes.get('/users', adminAuth, async (req, res) => {
+  try {
+    const adminId = req.user._id;
+    const users = await User.find({ _id: { $ne: adminId } }).select('email username role createdAt');
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ message: 'Failed to fetch users: ' + error.message });
+  }
+});
+
+authRoutes.delete('/users/:userId', adminAuth, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const adminId = req.user._id;
+
+    if (userId === adminId.toString()) {
+      return res.status(400).json({ message: 'Cannot delete your own admin account' });
+    }
+
+    const user = await User.findByIdAndDelete(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Delete all files associated with the user
+    await File.deleteMany({ userId });
+
+    console.log(`User deleted by admin: ${user.email}`);
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ message: 'Failed to delete user: ' + error.message });
   }
 });
 
@@ -271,7 +349,7 @@ authRoutes.post('/login', async (req, res) => {
     }
     console.log('Login successful:', email);
     const token = jwt.sign(
-      { _id: user._id, email: user.email, username: user.username || email.split('@')[0] },
+      { _id: user._id, email: user.email, username: user.username || email.split('@')[0], role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
@@ -352,7 +430,7 @@ authRoutes.get('/github/callback',
         return res.redirect('http://localhost:4200/auth/callback?error=GitHub authentication failed: No user found');
       }
       const token = jwt.sign(
-        { _id: req.user._id, email: req.user.email, username: req.user.username },
+        { _id: req.user._id, email: req.user.email, username: req.user.username, role: req.user.role },
         process.env.JWT_SECRET,
         { expiresIn: '1h' }
       );

@@ -27,6 +27,14 @@ interface SavedFile {
   updatedAt: string;
 }
 
+interface User {
+  _id: string;
+  email: string;
+  username: string | null;
+  role: 'user' | 'admin';
+  createdAt: string;
+}
+
 // AuthComponent
 @Component({
   selector: 'app-auth',
@@ -480,10 +488,16 @@ class AuthComponent implements AfterViewInit, OnInit {
       localStorage.setItem('token', token);
       const decoded: any = jwtDecode(token);
       const username = decoded.username || decoded.email.split('@')[0];
+      const role = decoded.role || 'user';
       localStorage.setItem('username', username);
-      console.log('Token stored, username:', username);
+      localStorage.setItem('role', role);
+      console.log('Token stored, username:', username, 'role:', role);
       this.toastr.success('GitHub login successful!', 'Success');
-      this.router.navigate(['/code']);
+      if (role === 'admin') {
+        this.router.navigate(['/admin']);
+      } else {
+        this.router.navigate(['/code']);
+      }
     } else {
       this.errorMessage = error || 'GitHub authentication failed. Please try again.';
       this.toastr.error(this.errorMessage, 'Error');
@@ -499,14 +513,20 @@ class AuthComponent implements AfterViewInit, OnInit {
         localStorage.setItem('token', response.token);
         const decoded: any = jwtDecode(response.token);
         const username = decoded.username || this.email.split('@')[0];
+        const role = decoded.role || 'user';
         localStorage.setItem('username', username);
+        localStorage.setItem('role', role);
         this.errorMessage = '';
         this.email = '';
         this.password = '';
         this.secretQuestion = '';
         this.secretAnswer = '';
         this.toastr.success('Signup successful! Welcome to CodeCraft!', 'Success');
-        this.router.navigate(['/code']);
+        if (role === 'admin') {
+          this.router.navigate(['/admin']);
+        } else {
+          this.router.navigate(['/code']);
+        }
       },
       error: (error) => {
         this.errorMessage = error.error?.message || 'Signup failed';
@@ -523,12 +543,18 @@ class AuthComponent implements AfterViewInit, OnInit {
         localStorage.setItem('token', response.token);
         const decoded: any = jwtDecode(response.token);
         const username = decoded.username || this.email.split('@')[0];
+        const role = decoded.role || 'user';
         localStorage.setItem('username', username);
+        localStorage.setItem('role', role);
         this.errorMessage = '';
         this.email = '';
         this.password = '';
         this.toastr.success('Login successful! Ready to code!', 'Success');
-        this.router.navigate(['/code']);
+        if (role === 'admin') {
+          this.router.navigate(['/admin']);
+        } else {
+          this.router.navigate(['/code']);
+        }
       },
       error: (error) => {
         this.errorMessage = error.error?.message || 'Login failed';
@@ -537,7 +563,6 @@ class AuthComponent implements AfterViewInit, OnInit {
       }
     });
   }
-
   onResetPasswordSubmit() {
     console.log('Reset password submitted:', this.email);
     if (!this.email) {
@@ -576,6 +601,176 @@ class AuthComponent implements AfterViewInit, OnInit {
         console.error('Forgot password error:', error);
       }
     });
+  }
+}
+
+@Component({
+  selector: 'app-admin',
+  template: `
+    <div class="flex flex-col items-center justify-center w-full max-w-6xl p-4 min-h-screen">
+      <div class="flex items-center justify-between w-full mb-4">
+        <div class="text-4xl font-bold">
+          <a routerLink="/" class="gradient-text">CodeCraft</a>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="text-2xl text-white">Welcome, {{ username }} (Admin)!</span>
+          <button 
+            (click)="signOut()" 
+            class="glassmorphism-button flex items-center justify-center gap-2 py-2 px-4"
+          >
+            <span class="text-black">Logout</span>
+            <fa-icon [icon]="['fas', 'sign-out-alt']" class="text-lg glassmorphism-icon"></fa-icon>
+          </button>
+        </div>
+      </div>
+      <div class="w-full glassmorphism p-6 rounded-xl">
+        <h2 class="text-3xl font-bold text-white mb-4">User Management</h2>
+        <div *ngIf="isLoading" class="text-white">Loading users...</div>
+        <div *ngIf="!isLoading && users.length === 0" class="text-white">No users found</div>
+        <div *ngIf="!isLoading && users.length > 0" class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="text-gray-300">
+                <th class="p-2">Email</th>
+                <th class="p-2">Username</th>
+                <th class="p-2">Role</th>
+                <th class="p-2">Created At</th>
+                <th class="p-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let user of users" class="border-t border-gray-600">
+                <td class="p-2">{{ user.email }}</td>
+                <td class="p-2">{{ user.username || 'N/A' }}</td>
+                <td class="p-2">{{ user.role }}</td>
+                <td class="p-2">{{ user.createdAt | date:'medium' }}</td>
+                <td class="p-2">
+                  <button 
+                    (click)="deleteUser(user._id)" 
+                    class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm"
+                    title="Delete User"
+                  >
+                    <fa-icon [icon]="['fas', 'trash-can']" class="text-lg"></fa-icon>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `
+})
+class AdminComponent implements OnInit {
+  username: string = '';
+  users: User[] = [];
+  isLoading: boolean = false;
+  private apiUrl = 'http://localhost:5000/api/auth';
+
+  constructor(
+    private router: Router,
+    private http: HttpClient,
+    private toastr: ToastrService,
+    private titleService: Title
+  ) {
+    this.titleService.setTitle('CodeCraft - Admin Dashboard');
+  }
+
+  ngOnInit() {
+    const token = localStorage.getItem('token');
+    this.username = localStorage.getItem('username') || '';
+    const role = localStorage.getItem('role') || 'user';
+
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    if (role !== 'admin') {
+      this.toastr.error('Access denied: Admins only.', 'Error');
+      this.router.navigate(['/code']);
+      return;
+    }
+
+    this.fetchUsers(token);
+  }
+
+  fetchUsers(token: string) {
+    this.isLoading = true;
+
+    this.http.get<User[]>(`${this.apiUrl}/users`, {
+      headers: { 'x-auth-token': token }
+    }).pipe(
+      catchError(error => {
+        if (error.status === 401 || error.status === 403) {
+          this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          localStorage.removeItem('role');
+          this.router.navigate(['/login']);
+        } else {
+          this.toastr.error(error.error?.message || 'Error retrieving users', 'Error');
+        }
+        this.isLoading = false;
+        return throwError(error);
+      })
+    ).subscribe({
+      next: (users) => {
+        this.users = users;
+        this.isLoading = false;
+        this.toastr.success('Users retrieved successfully!', 'Success');
+      },
+      error: () => {
+        this.isLoading = false;
+      }
+    });
+  }
+
+  deleteUser(userId: string) {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.http.delete(`${this.apiUrl}/users/${userId}`, {
+      headers: { 'x-auth-token': token }
+    }).pipe(
+      catchError(error => {
+        if (error.status === 401 || error.status === 403) {
+          this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          localStorage.removeItem('role');
+          this.router.navigate(['/login']);
+        } else {
+          this.toastr.error(error.error?.message || 'Failed to delete user', 'Error');
+        }
+        return throwError(error);
+      })
+    ).subscribe({
+      next: () => {
+        this.users = this.users.filter(user => user._id !== userId);
+        this.toastr.success('User deleted successfully!', 'Success');
+      }
+    });
+  }
+
+  signOut() {
+    if (confirm('Are you sure you want to sign out?')) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('username');
+      localStorage.removeItem('role');
+      this.username = '';
+      this.users = [];
+      this.toastr.info('Logged out successfully', 'Info');
+      this.router.navigate(['/login']);
+    }
   }
 }
 
@@ -721,9 +916,13 @@ class CodeComponent implements OnInit, AfterViewInit {
   ngOnInit() {
     const token = localStorage.getItem('token');
     this.username = localStorage.getItem('username') || '';
+    const role = localStorage.getItem('role') || 'user';
+
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
+    } else if (role === 'admin') {
+      this.router.navigate(['/admin']);
     } else {
       this.fetchSavedFiles();
     }
@@ -1326,13 +1525,13 @@ class LandingComponent implements AfterViewInit {
   template: `
     <div class="relative min-h-screen bg-gradient-to-br from-gray-900 to-black">
       <canvas *ngIf="!isLoggedIn" #backgroundCanvas class="absolute inset-0 w-full h-full z-0"></canvas>
-      <nav *ngIf="router.url !== '/code'" class="relative z-10 flex items-center justify-between p-4 bg-transparent">
+      <nav *ngIf="router.url !== '/code' && router.url !== '/admin'" class="relative z-10 flex items-center justify-between p-4 bg-transparent">
         <div class="flex items-center justify-between w-full">
           <div class="text-3xl font-bold">
             <a routerLink="/" class="gradient-text">CodeCraft</a>
           </div>
           <div class="flex items-center gap-6">
-            <span *ngIf="isLoggedIn" class="text-xl text-white">{{ username }}</span>
+            <span *ngIf="isLoggedIn" class="text-xl text-white">{{ username }} ({{ role | titlecase }})</span>
             <button 
               *ngIf="isLoggedIn" 
               (click)="signOut()" 
@@ -1346,6 +1545,9 @@ class LandingComponent implements AfterViewInit {
               <li><a routerLink="/languages" class="hover:text-gray-300">Supported Languages</a></li>
               <li><a routerLink="/signup" class="glassmorphism-button py-2 px-4">Signup</a></li>
               <li><a routerLink="/login" class="glassmorphism-button py-2 px-4">Login</a></li>
+            </ul>
+            <ul *ngIf="isLoggedIn && role === 'admin'" class="flex items-center gap-6 text-white">
+              <li><a routerLink="/admin" class="hover:text-gray-300">Admin Dashboard</a></li>
             </ul>
           </div>
         </div>
@@ -1363,6 +1565,7 @@ class AppComponent implements AfterViewInit {
   private stars: THREE.Points | null = null;
   isLoggedIn: boolean = false;
   username: string = '';
+  role: string = '';
 
   constructor(
     public router: Router,
@@ -1391,7 +1594,8 @@ class AppComponent implements AfterViewInit {
     const token = localStorage.getItem('token');
     this.isLoggedIn = !!token;
     this.username = localStorage.getItem('username') || '';
-    console.log('Checked login status, isLoggedIn:', this.isLoggedIn, 'Username:', this.username);
+    this.role = localStorage.getItem('role') || 'user';
+    console.log('Checked login status, isLoggedIn:', this.isLoggedIn, 'Username:', this.username, 'Role:', this.role);
     if (this.isLoggedIn && this.backgroundRenderer) {
       this.stopStarsAnimation();
     } else if (!this.isLoggedIn && !this.backgroundRenderer) {
@@ -1483,8 +1687,10 @@ class AppComponent implements AfterViewInit {
     if (confirm('Are you sure you want to sign out?')) {
       localStorage.removeItem('token');
       localStorage.removeItem('username');
+      localStorage.removeItem('role');
       this.isLoggedIn = false;
       this.username = '';
+      this.role = '';
       this.toastr.info('Logged out successfully', 'Info');
       this.router.navigate(['/login']);
     }
@@ -1500,12 +1706,12 @@ const routes: Routes = [
   { path: 'code', component: CodeComponent },
   { path: 'reset-password', component: AuthComponent },
   { path: 'forgot-password', component: AuthComponent },
+  { path: 'admin', component: AdminComponent },
   { path: '**', redirectTo: '' }
 ];
-
 // AppModule
 @NgModule({
-  declarations: [AppComponent, AuthComponent, CodeComponent, LandingComponent],
+  declarations: [AppComponent, AuthComponent, CodeComponent, LandingComponent, AdminComponent],
   imports: [
     BrowserModule,
     FormsModule,
@@ -1527,7 +1733,7 @@ const routes: Routes = [
 })
 class AppModule {
   constructor(library: FaIconLibrary) {
-    library.addIcons(faGithub, faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle);
+    library.addIcons(faGithub, faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle, faTrashCan);
   }
 }
 
@@ -1694,35 +1900,7 @@ styleSheet.textContent = tailwindStyles;
 document.head.appendChild(styleSheet);
 
 // Bootstrap the Application with Error Handling
-function bootstrapApp(): void {
-  platformBrowserDynamic()
-    .bootstrapModule(AppModule)
-    .then(moduleRef => {
-      const injector = moduleRef.injector;
-      const router = injector.get(Router);
 
-      const token = localStorage.getItem('token');
-      const currentPath = window.location.pathname;
-      if (token && (currentPath === '/login' || currentPath === '/signup' || currentPath === '/reset-password' || currentPath === '/forgot-password')) {
-        console.log('User is logged in, redirecting from', currentPath, 'to /code');
-        router.navigate(['/code']);
-      }
-
-      router.events.subscribe(event => {
-        if (event instanceof NavigationEnd) {
-          const updatedToken = localStorage.getItem('token');
-          if (updatedToken && (event.url === '/login' || event.url === '/signup' || event.url === '/reset-password' || event.url === '/forgot-password')) {
-            console.log('User is logged in, redirecting from', event.url, 'to /code');
-            router.navigate(['/code']);
-          }
-        }
-      });
-    })
-    .catch((err: unknown) => {
-      console.error('Bootstrap error:', err);
-      handleBootstrapError(err);
-    });
-}
 
 function handleBootstrapError(err: unknown): void {
   let errorMessage = 'An unexpected error occurred during application startup.';
@@ -1743,6 +1921,47 @@ function handleBootstrapError(err: unknown): void {
       <p>Please try refreshing the page or contact support.</p>
     </div>
   `;
+}
+
+function bootstrapApp(): void {
+  platformBrowserDynamic()
+    .bootstrapModule(AppModule)
+    .then(moduleRef => {
+      const injector = moduleRef.injector;
+      const router = injector.get(Router);
+
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('role') || 'user';
+      const currentPath = window.location.pathname;
+
+      if (token) {
+        if (currentPath === '/login' || currentPath === '/signup' || currentPath === '/reset-password' || currentPath === '/forgot-password') {
+          console.log('User is logged in, redirecting from', currentPath, 'to appropriate route');
+          router.navigate([role === 'admin' ? '/admin' : '/code']);
+        } else if (role === 'admin' && currentPath === '/code') {
+          router.navigate(['/admin']);
+        }
+      }
+
+      router.events.subscribe(event => {
+        if (event instanceof NavigationEnd) {
+          const updatedToken = localStorage.getItem('token');
+          const updatedRole = localStorage.getItem('role') || 'user';
+          if (updatedToken) {
+            if (event.url === '/login' || event.url === '/signup' || event.url === '/reset-password' || event.url === '/forgot-password') {
+              console.log('User is logged in, redirecting from', event.url, 'to appropriate route');
+              router.navigate([updatedRole === 'admin' ? '/admin' : '/code']);
+            } else if (updatedRole === 'admin' && event.url === '/code') {
+              router.navigate(['/admin']);
+            }
+          }
+        }
+      });
+    })
+    .catch((err: unknown) => {
+      console.error('Bootstrap error:', err);
+      handleBootstrapError(err);
+    });
 }
 
 // Start the application
