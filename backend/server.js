@@ -91,6 +91,7 @@ io.on('connection', (socket) => {
 // Middleware
 app.use(cors({
   origin: 'http://localhost:4200',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
 app.use(express.json());
@@ -136,17 +137,20 @@ connectDB();
 const adminAuth = async (req, res, next) => {
   const token = req.header('x-auth-token');
   if (!token) {
+    console.log('No token provided');
     return res.status(401).json({ message: 'No token, authorization denied' });
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Decoded JWT:', decoded); // Add for debugging
+    console.log('Decoded JWT in adminAuth:', decoded);
     if (decoded.role !== 'admin') {
+      console.log('Access denied: User role is not admin', decoded.role);
       return res.status(403).json({ message: 'Access denied: Admins only' });
     }
     req.user = decoded;
     next();
   } catch (error) {
+    console.error('Token verification failed:', error.message);
     res.status(401).json({ message: 'Token is not valid' });
   }
 };
@@ -330,6 +334,8 @@ const auth = (req, res, next) => {
 // Authentication Routes
 const authRoutes = express.Router();
 
+
+
 authRoutes.post('/signup', async (req, res) => {
   try {
     const { email, password, secretQuestion, secretAnswer } = req.body;
@@ -382,16 +388,20 @@ authRoutes.delete('/users/:userId', adminAuth, async (req, res) => {
     const adminId = req.user._id;
 
     if (userId === adminId.toString()) {
+      console.log('Admin attempted to delete own account:', adminId);
       return res.status(400).json({ message: 'Cannot delete your own admin account' });
     }
 
+    // Find and delete the user
     const user = await User.findByIdAndDelete(userId);
     if (!user) {
+      console.log('User not found for deletion:', userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
     // Delete all files associated with the user
-    await File.deleteMany({ userId });
+    const fileDeletionResult = await File.deleteMany({ userId });
+    console.log(`Deleted ${fileDeletionResult.deletedCount} files for user: ${user.email}`);
 
     console.log(`User deleted by admin: ${user.email}`);
     res.json({ message: 'User deleted successfully' });

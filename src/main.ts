@@ -7,6 +7,7 @@ import { trigger, state, style, animate, transition } from '@angular/animations'
 import { FormsModule } from '@angular/forms';
 import { HttpClientModule, HttpClient } from '@angular/common/http';
 import * as THREE from 'three';
+import { Clipboard } from '@angular/cdk/clipboard';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -738,7 +739,7 @@ class AdminComponent implements OnInit {
   username: string = '';
   users: User[] = [];
   isLoading: boolean = false;
-  private apiUrl = 'http://localhost:5000/api';
+  private apiUrl = 'http://localhost:5000/api'
   selectedUserFiles: { [userId: string]: SavedFile[] } = {};
   showFiles: { [userId: string]: boolean } = {};
   selectedFileContent: string | null = null;
@@ -805,18 +806,21 @@ class AdminComponent implements OnInit {
 
   deleteUser(userId: string) {
     if (!confirm('Are you sure you want to delete this user?')) return;
-
+  
     const token = localStorage.getItem('token');
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
       return;
     }
-
+  
+    this.isLoading = true; // Show loading spinner
+    console.log('Sending DELETE request for user:', userId);
     this.http.delete(`${this.apiUrl}/users/${userId}`, {
       headers: { 'x-auth-token': token }
     }).pipe(
       catchError(error => {
+        console.error('Delete user error:', error);
         if (error.status === 401 || error.status === 403) {
           this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
           localStorage.removeItem('token');
@@ -826,11 +830,18 @@ class AdminComponent implements OnInit {
         } else {
           this.toastr.error(error.error?.message || 'Failed to delete user', 'Error');
         }
+        this.isLoading = false;
         return throwError(error);
       })
     ).subscribe({
-      next: () => {
+      next: (response) => {
+        console.log('Delete user response:', response);
         this.users = this.users.filter(user => user._id !== userId);
+        if (this.selectedUserFiles[userId]) {
+          delete this.selectedUserFiles[userId];
+          delete this.showFiles[userId];
+        }
+        this.isLoading = false;
         this.toastr.success('User deleted successfully!', 'Success');
       }
     });
@@ -934,6 +945,23 @@ class AdminComponent implements OnInit {
 @Component({
   selector: 'app-code',
   template: `
+    <!-- Navigation Bar -->
+    <div class="glassmorphism p-4 mb-4 flex justify-between items-center w-full max-w-6xl mx-auto">
+      <div class="text-4xl font-bold">
+        <a routerLink="/" class="gradient-text">CodeCraft</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="text-2xl text-white">Welcome, {{ username }}!</span>
+        <button 
+          (click)="signOut()" 
+          class="glassmorphism-button flex items-center justify-center gap-2 py-2 px-4"
+        >
+          <span class="text-black">Logout</span>
+          <fa-icon [icon]="['fas', 'sign-out-alt']" class="text-lg glassmorphism-icon"></fa-icon>
+        </button>
+      </div>
+    </div>
+
     <div class="flex flex-col lg:flex-row gap-4 p-4 min-h-screen">
       <!-- Left Column: Collaboration Room and Saved Files -->
       <div class="flex-1 flex flex-col gap-4">
@@ -966,7 +994,16 @@ class AdminComponent implements OnInit {
             <div *ngIf="roomError" class="text-red-500">{{ roomError }}</div>
           </div>
           <div *ngIf="roomId" class="space-y-2">
-            <p class="text-white">Room ID: {{ roomId }}</p>
+            <div class="flex items-center gap-2">
+              <p class="text-white">Room ID: {{ roomId }}</p>
+              <button 
+                (click)="copyRoomId()" 
+                class="glassmorphism-button py-1 px-2 text-sm bg-green-600 hover:bg-green-700"
+                title="Copy Room ID"
+              >
+                Copy
+              </button>
+            </div>
             <button 
               (click)="leaveRoom()" 
               class="glassmorphism-button w-full py-2 bg-red-600 hover:bg-red-700"
@@ -1127,7 +1164,8 @@ class CodeComponent implements OnInit, AfterViewInit {
     private router: Router, 
     private titleService: Title,
     private http: HttpClient,
-    private toastr: ToastrService
+    private toastr: ToastrService,
+    private clipboard: Clipboard // Inject Angular Clipboard service
   ) {
     console.log('CodeComponent initialized, ToastrService injected');
     setTimeout(() => {
@@ -1691,6 +1729,15 @@ public class Main {
         this.code = this.editor.getValue();
       });
     });
+  }
+
+  copyRoomId() {
+    if (this.roomId) {
+      this.clipboard.copy(this.roomId);
+      this.toastr.success('Room ID copied to clipboard!', 'Success');
+    } else {
+      this.toastr.error('No room ID to copy.', 'Error');
+    }
   }
 
   signOut() {
