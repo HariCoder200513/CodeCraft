@@ -1706,6 +1706,7 @@ public class Main {
   }
 }
 
+
 // LandingComponent (unchanged)
 @Component({
   selector: 'app-landing',
