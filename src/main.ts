@@ -1161,11 +1161,11 @@ class CodeComponent implements OnInit, AfterViewInit {
   private apiUrl = 'http://localhost:5000/api';
 
   constructor(
-    private router: Router, 
+    private router: Router,
     private titleService: Title,
     private http: HttpClient,
     private toastr: ToastrService,
-    private clipboard: Clipboard // Inject Angular Clipboard service
+    private clipboard: Clipboard
   ) {
     console.log('CodeComponent initialized, ToastrService injected');
     setTimeout(() => {
@@ -1179,7 +1179,7 @@ class CodeComponent implements OnInit, AfterViewInit {
     const token = localStorage.getItem('token');
     this.username = localStorage.getItem('username') || '';
     const role = localStorage.getItem('role') || 'user';
-  
+
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
@@ -1198,16 +1198,18 @@ class CodeComponent implements OnInit, AfterViewInit {
       if (this.roomId === roomId) {
         this.roomUsers = [...this.roomUsers, user];
         this.toastr.info(`${user.username} joined the room`, 'User Joined');
+        this.fetchSavedFiles(); // Sync files when a new user joins
       }
     });
-  
+
     this.socket.on('userLeft', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
       if (this.roomId === roomId) {
         this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
         this.toastr.info(`${username} left the room`, 'User Left');
+        this.fetchSavedFiles(); // Sync files when a user leaves
       }
     });
-  
+
     this.socket.on('userKicked', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
       if (this.roomId === roomId) {
         if (userId === this.creatorId) {
@@ -1216,10 +1218,27 @@ class CodeComponent implements OnInit, AfterViewInit {
         } else {
           this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
           this.toastr.info(`${username} was kicked from the room`, 'User Kicked');
+          this.fetchSavedFiles(); // Sync files when a user is kicked
         }
       }
     });
+
+    this.socket.on('codeSaved', ({ roomId, filename, language, code }: { roomId: string; filename: string; language: string; code: string }) => {
+      if (this.roomId === roomId) {
+        // Update editor if the saved file matches the currently loaded file
+        if (this.filename === filename && this.editor) {
+          this.selectedLanguage = language;
+          this.code = code;
+          this.editor.setValue(code);
+          (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), language);
+          this.toastr.info(`Code updated by another user in ${filename}`, 'Update');
+        }
+        // Refresh saved files list for all users
+        this.fetchSavedFiles();
+      }
+    });
   }
+
   createRoom() {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -1227,7 +1246,7 @@ class CodeComponent implements OnInit, AfterViewInit {
       this.router.navigate(['/login']);
       return;
     }
-  
+
     this.http.post<{ roomId: string }>(`${this.apiUrl}/rooms/create`, {}, {
       headers: { 'x-auth-token': token }
     }).subscribe({
@@ -1245,21 +1264,21 @@ class CodeComponent implements OnInit, AfterViewInit {
       }
     });
   }
-  
+
   joinRoom() {
     if (!this.roomIdInput) {
       this.roomError = 'Please enter a room ID';
       this.toastr.error(this.roomError, 'Error');
       return;
     }
-  
+
     const token = localStorage.getItem('token');
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
       return;
     }
-  
+
     this.http.post<{ room: Room }>(`${this.apiUrl}/rooms/join`, { roomId: this.roomIdInput }, {
       headers: { 'x-auth-token': token }
     }).subscribe({
@@ -1278,7 +1297,7 @@ class CodeComponent implements OnInit, AfterViewInit {
       }
     });
   }
-  
+
   leaveRoom() {
     if (this.roomId) {
       this.socket.emit('leaveRoom', { roomId: this.roomId, userId: this.creatorId, username: this.username });
@@ -1289,20 +1308,20 @@ class CodeComponent implements OnInit, AfterViewInit {
       this.toastr.info('You left the room', 'Info');
     }
   }
-  
+
   kickUser(userId: string) {
     if (!this.isCreator) {
       this.toastr.error('Only the room creator can kick users', 'Error');
       return;
     }
-  
+
     const token = localStorage.getItem('token');
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
       return;
     }
-  
+
     const username = this.roomUsers.find(u => u._id === userId)?.username || 'User';
     this.http.post(`${this.apiUrl}/rooms/kick`, { roomId: this.roomId, userId }, {
       headers: { 'x-auth-token': token }
@@ -1368,21 +1387,22 @@ public class Main {
         return '';
     }
   }
+
   deleteFile(fileId: string) {
     if (!confirm('Are you sure you want to delete this file?')) return;
-  
+
     const token = localStorage.getItem('token');
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
       return;
     }
-  
+
     this.http.delete(`${this.apiUrl}/files/delete/${fileId}`, {
       headers: { 'x-auth-token': token }
     }).pipe(
       catchError(error => {
-        console.error('Delete file error:', error); // Debug backend error
+        console.error('Delete file error:', error);
         if (error.status === 401) {
           this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
           localStorage.removeItem('token');
@@ -1390,48 +1410,42 @@ public class Main {
           this.router.navigate(['/login']);
         } else {
           this.toastr.error(error.error?.message || 'Failed to delete file. Please try again.', 'Error');
-          // Re-fetch files to restore UI state
           this.fetchSavedFiles();
         }
         return throwError(() => error);
       })
     ).subscribe({
       next: () => {
-        console.log(`File ${fileId} deleted successfully from backend`); // Debug success
-        // Update savedFiles
+        console.log(`File ${fileId} deleted successfully from backend`);
         this.savedFiles = this.savedFiles.filter(file => file._id !== fileId);
-  
-        // Reset editor and state if the deleted file is selected
         if (this.selectedFileId === fileId) {
-          console.log('Resetting editor for deleted file:', fileId); // Debug
           this.selectedFileId = null;
           this.filename = '';
           this.code = this.getDefaultCode(this.selectedLanguage) || '// Start coding here...';
           if (this.editor) {
             try {
               this.editor.setValue(this.code);
-              this.editor.updateOptions({ readOnly: false }); // Ensure editor is editable
-              this.editor.focus(); // Force UI refresh
-              console.log('Editor content set to:', this.code); // Debug
+              this.editor.updateOptions({ readOnly: false });
+              this.editor.focus();
+              console.log('Editor content set to:', this.code);
             } catch (err) {
               console.error('Error updating Monaco Editor:', err);
               this.toastr.error('Failed to reset editor content.', 'Error');
             }
           } else {
-            console.warn('Monaco Editor instance not found'); // Debug
+            console.warn('Monaco Editor instance not found');
             this.toastr.warning('Editor instance not available. Please refresh the page.', 'Warning');
           }
         }
-  
         this.toastr.success('File deleted successfully!', 'Success');
-        // Re-fetch files to ensure UI syncs with backend
         this.fetchSavedFiles();
       },
       error: (err) => {
-        console.error('Unexpected error during file deletion:', err); // Debug
+        console.error('Unexpected error during file deletion:', err);
       }
     });
   }
+
   onLanguageChange() {
     this.code = this.getDefaultCode(this.selectedLanguage);
     this.filename = '';
@@ -1643,7 +1657,16 @@ public class Main {
         this.saveMessage = response.message || 'Code saved successfully';
         this.isSaving = false;
         this.toastr.success(`File "${this.filename}" saved successfully!`, 'Success');
-        this.fetchSavedFiles();
+        // Broadcast code save event to all users in the room, including sender
+        if (this.roomId) {
+          this.socket.emit('codeSaved', {
+            roomId: this.roomId,
+            filename: this.filename,
+            language: this.selectedLanguage,
+            code: codeToSave
+          });
+        }
+        this.fetchSavedFiles(); // Refresh files list for the current user
       },
       error: () => {
         this.isSaving = false;

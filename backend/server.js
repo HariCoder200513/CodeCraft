@@ -83,6 +83,10 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('userKicked', { roomId, userId, username });
   });
 
+  socket.on('codeSaved', ({ roomId, filename, language, code }) => {
+    io.to(roomId).emit('codeSaved', { roomId, filename, language, code });
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
