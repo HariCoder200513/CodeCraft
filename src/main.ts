@@ -510,23 +510,13 @@ class AuthComponent implements AfterViewInit, OnInit {
     console.log('Signup submitted:', this.email);
     this.signup(this.email, this.password, this.secretQuestion, this.secretAnswer).subscribe({
       next: (response) => {
-        localStorage.setItem('token', response.token);
-        const decoded: any = jwtDecode(response.token);
-        const username = decoded.username || this.email.split('@')[0];
-        const role = decoded.role || 'user';
-        localStorage.setItem('username', username);
-        localStorage.setItem('role', role);
         this.errorMessage = '';
         this.email = '';
         this.password = '';
         this.secretQuestion = '';
         this.secretAnswer = '';
-        this.toastr.success('Signup successful! Welcome to CodeCraft!', 'Success');
-        if (role === 'admin') {
-          this.router.navigate(['/admin']);
-        } else {
-          this.router.navigate(['/code']);
-        }
+        this.toastr.success('Signup successful! Please log in to continue.', 'Success');
+        this.router.navigate(['/login']);
       },
       error: (error) => {
         this.errorMessage = error.error?.message || 'Signup failed';

@@ -35,16 +35,15 @@ const connectDB = async () => {
     const adminEmail = 'admin@codecraft.com';
     const adminExists = await User.findOne({ email: adminEmail });
     if (!adminExists) {
-      const hashedPassword = await bcrypt.hash('Admin123', 10);
       const adminUser = new User({
         email: adminEmail,
-        password: hashedPassword,
         secretQuestion: 'What is your role?',
         secretAnswer: 'Admin',
         username: 'admin',
         role: 'admin',
         provider: 'local'
       });
+      adminUser.password = 'Admin123'; // Set plain password, let middleware hash it
       await adminUser.save();
       console.log(`Admin user created: ${adminEmail}`);
     } else {
