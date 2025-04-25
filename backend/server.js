@@ -9,7 +9,84 @@ const axios = require('axios');
 const https = require('https');
 require('dotenv').config();
 
+const http = require('http');
+const { Server } = require('socket.io');
+
+// Room Schema
+const RoomSchema = new mongoose.Schema({
+  roomId: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  creatorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  users: [{
+    _id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    username: String
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const Room = mongoose.model('Room', RoomSchema);
+
 const app = express();
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:4200',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+
+  socket.on('joinRoom', ({ roomId, user }) => {
+    socket.join(roomId);
+    io.to(roomId).emit('userJoined', { roomId, user });
+  });
+
+  socket.on('leaveRoom', async ({ roomId, userId, username }) => {
+    socket.leave(roomId);
+    io.to(roomId).emit('userLeft', { roomId, userId, username });
+  
+    // Update room in database
+    try {
+      const room = await Room.findOne({ roomId });
+      if (room) {
+        room.users = room.users.filter(u => u._id.toString() !== userId);
+        await room.save();
+        // Delete room if empty
+        if (room.users.length === 0) {
+          await Room.deleteOne({ roomId });
+          console.log(`Room deleted (empty after leave): ${roomId}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating room on leave:', error);
+    }
+  });
+
+  socket.on('kickUser', ({ roomId, userId, username }) => {
+    io.to(roomId).emit('userKicked', { roomId, userId, username });
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
 
 // Middleware
 app.use(cors({
@@ -543,6 +620,96 @@ fileRoutes.delete('/delete/:fileId', auth, async (req, res) => {
   }
 });
 
+const roomRoutes = express.Router();
+const { v4: uuidv4 } = require('uuid');
+
+roomRoutes.post('/create', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const roomId = uuidv4();
+    const room = new Room({
+      roomId,
+      creatorId: userId,
+      users: [{ _id: userId, username: req.user.username || req.user.email.split('@')[0] }]
+    });
+    await room.save();
+    console.log(`Room created: ${roomId} by user: ${userId}`);
+    res.json({ roomId });
+  } catch (error) {
+    console.error('Error creating room:', error);
+    res.status(500).json({ message: 'Failed to create room: ' + error.message });
+  }
+});
+
+roomRoutes.post('/join', auth, async (req, res) => {
+  try {
+    const { roomId } = req.body;
+    const userId = req.user._id;
+    const username = req.user.username || req.user.email.split('@')[0];
+
+    if (!roomId) {
+      return res.status(400).json({ message: 'Room ID is required' });
+    }
+
+    const room = await Room.findOne({ roomId });
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    if (room.users.some(u => u._id.toString() === userId)) {
+      return res.status(400).json({ message: 'User already in room' });
+    }
+
+    room.users.push({ _id: userId, username });
+    await room.save();
+    console.log(`User ${userId} joined room: ${roomId}`);
+    res.json({ room });
+  } catch (error) {
+    console.error('Error joining room:', error);
+    res.status(500).json({ message: 'Failed to join room: ' + error.message });
+  }
+});
+
+roomRoutes.post('/kick', auth, async (req, res) => {
+  try {
+    const { roomId, userId } = req.body;
+    const creatorId = req.user._id;
+
+    if (!roomId || !userId) {
+      return res.status(400).json({ message: 'Room ID and user ID are required' });
+    }
+
+    const room = await Room.findOne({ roomId });
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    if (room.creatorId.toString() !== creatorId) {
+      return res.status(403).json({ message: 'Only the room creator can kick users' });
+    }
+
+    if (!room.users.some(u => u._id.toString() === userId)) {
+      return res.status(400).json({ message: 'User not in room' });
+    }
+
+    room.users = room.users.filter(u => u._id.toString() !== userId);
+    await room.save();
+
+    // Delete room if empty
+    if (room.users.length === 0) {
+      await Room.deleteOne({ roomId });
+      console.log(`Room deleted (empty after kick): ${roomId}`);
+    }
+
+    console.log(`User ${userId} kicked from room: ${roomId}`);
+    res.json({ message: 'User kicked successfully' });
+  } catch (error) {
+    console.error('Error kicking user:', error);
+    res.status(500).json({ message: 'Failed to kick user: ' + error.message });
+  }
+});
+
+
 // Piston API Configuration
 const PISTON_API_URL = 'https://emkc.org/api/v2/piston/execute';
 
@@ -640,6 +807,8 @@ app.use((err, req, res, next) => {
 
 // Start the Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.use('/api/rooms', roomRoutes);
+
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

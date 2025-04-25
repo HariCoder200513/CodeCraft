@@ -19,6 +19,16 @@ import { enableProdMode } from '@angular/core';
 import { ToastrModule, ToastrService } from 'ngx-toastr';
 
 // Interface for File
+
+import { io } from 'socket.io-client';
+
+// Interface for Room
+interface Room {
+  roomId: string;
+  creatorId: string;
+  users: User[];
+}
+
 interface SavedFile {
   _id: string;
   filename: string;
@@ -28,13 +38,18 @@ interface SavedFile {
   updatedAt: string;
 }
 
+
+
 interface User {
   _id: string;
-  email: string;
-  username: string | null;
-  role: 'user' | 'admin';
-  createdAt: string;
+  username: string;
+  email?: string;
+  role?: string;
+  createdAt?: string;
 }
+
+// Interface for Room
+
 
 // AuthComponent
 @Component({
@@ -919,105 +934,162 @@ class AdminComponent implements OnInit {
 @Component({
   selector: 'app-code',
   template: `
-    <div class="flex flex-col items-center justify-center w-full max-w-6xl p-4">
-      <div class="flex items-center justify-between w-full mb-4">
-        <div class="text-4xl font-bold">
-         <a routerLink="/" class="gradient-text">CodeCraft</a>
-          <!-- <span class="gradient-text">CodeCraft</span> -->
-        </div>
-        <div class="flex items-center gap-4">
-          <select 
-            [(ngModel)]="selectedLanguage" 
-            (change)="onLanguageChange()" 
-            class="glassmorphism-input py-2 px-4"
-          >
-            <option value="cpp">C++</option>
-            <option value="javascript">JavaScript</option>
-            <option value="python">Python</option>
-            <option value="java">Java</option>
-          </select>
-          <span class="text-2xl text-white">Welcome, {{ username }}!</span>
-          <button 
-            (click)="signOut()" 
-            class="glassmorphism-button flex items-center justify-center gap-2 py-2 px-4"
-          >
-            <span class="text-black">Logout</span>
-            <fa-icon [icon]="['fas', 'sign-out-alt']" class="text-lg glassmorphism-icon"></fa-icon>
-          </button>
-        </div>
-      </div>
-      <div class="flex w-full gap-4">
-        <div class="w-1/4 flex flex-col">
-          <div class="glassmorphism p-4 rounded-xl mb-4 h-[800px] overflow-auto">
-            <h3 class="text-xl font-bold text-white mb-2">Saved Files</h3>
-            <div *ngIf="isLoadingFiles" class="text-white">Loading files...</div>
-            <div *ngIf="!isLoadingFiles && savedFiles.length === 0" class="text-white">No saved files</div>
-            <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2 text-white">
-  <li *ngFor="let file of savedFiles" 
-      class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
-      [class.bg-white]="selectedFileId === file._id"
-      [class.bg-opacity-10]="selectedFileId === file._id">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2" (click)="loadFile(file._id)">
-        <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
-        <span>{{ file.filename }}</span>
-      </div>
-      <button (click)="deleteFile(file._id)" 
-              class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
-              title="Delete File">
-        🗑️ Delete
-      </button>
-    </div>
-    <div class="text-sm text-gray-400">
-      {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
-    </div>
-  </li>
-</ul>
+    <div class="flex flex-col lg:flex-row gap-4 p-4 min-h-screen">
+      <!-- Left Column: Collaboration Room and Saved Files -->
+      <div class="flex-1 flex flex-col gap-4">
+        <!-- Collaboration Room -->
+        <div class="glassmorphism p-4 rounded-xl">
+          <h3 class="text-xl font-bold text-white mb-2">Collaboration Room</h3>
+          <div *ngIf="!roomId" class="space-y-2">
+            <button 
+              (click)="createRoom()" 
+              class="glassmorphism-button w-full py-2"
+              [disabled]="isLoadingFiles"
+            >
+              Create Room
+            </button>
+            <div class="flex gap-2">
+              <input 
+                [(ngModel)]="roomIdInput" 
+                placeholder="Enter Room ID" 
+                class="glassmorphism-input w-full py-2 px-4"
+                name="roomIdInput"
+              >
+              <button 
+                (click)="joinRoom()" 
+                class="glassmorphism-button py-2 px-4"
+                [disabled]="!roomIdInput || isLoadingFiles"
+              >
+                Join
+              </button>
+            </div>
+            <div *ngIf="roomError" class="text-red-500">{{ roomError }}</div>
+          </div>
+          <div *ngIf="roomId" class="space-y-2">
+            <p class="text-white">Room ID: {{ roomId }}</p>
+            <button 
+              (click)="leaveRoom()" 
+              class="glassmorphism-button w-full py-2 bg-red-600 hover:bg-red-700"
+            >
+              Leave Room
+            </button>
           </div>
         </div>
-        <div class="w-3/4 flex flex-col">
-          <div #editorContainer class="h-[800px] border border-gray-500"></div>
-          <div class="flex flex-col gap-4 mt-4">
-            <div class="flex gap-4">
+
+        <!-- Saved Files -->
+        <div class="glassmorphism p-4 rounded-xl h-[400px] overflow-auto">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-xl font-bold text-white">Saved Files</h3>
+            <button 
+              *ngIf="roomId" 
+              (click)="toggleUsersList()" 
+              class="glassmorphism-button py-1 px-3 text-sm"
+            >
+              Users ({{ roomUsers.length }})
+            </button>
+          </div>
+          <!-- Users List Modal -->
+          <div *ngIf="showUsersList && roomId" class="glassmorphism p-4 rounded-xl mt-2">
+            <h4 class="text-lg font-bold text-white mb-2">Users in Room</h4>
+            <ul class="space-y-1">
+              <li *ngFor="let user of roomUsers" class="text-white flex justify-between items-center">
+                <span>{{ user.username }}</span>
+                <button 
+                  *ngIf="isCreator && user._id !== creatorId" 
+                  (click)="kickUser(user._id)" 
+                  class="glassmorphism-button bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm"
+                >
+                  Kick
+                </button>
+              </li>
+            </ul>
+            <button 
+              (click)="toggleUsersList()" 
+              class="glassmorphism-button w-full py-1 mt-2 bg-gray-600 hover:bg-gray-700"
+            >
+              Close
+            </button>
+          </div>
+          <div *ngIf="isLoadingFiles" class="text-white">Loading files...</div>
+          <div *ngIf="!isLoadingFiles && savedFiles.length === 0" class="text-white">No saved files</div>
+          <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2 text-white">
+            <li *ngFor="let file of savedFiles" 
+                class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
+                [class.bg-white]="selectedFileId === file._id"
+                [class.bg-opacity-10]="selectedFileId === file._id">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2" (click)="loadFile(file._id)">
+                  <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
+                  <span>{{ file.filename }}</span>
+                </div>
+                <button (click)="deleteFile(file._id)" 
+                        class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
+                        title="Delete File">
+                  🗑️ Delete
+                </button>
+              </div>
+              <div class="text-sm text-gray-400">
+                {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Right Column: Monaco Editor and Controls -->
+      <div class="flex-1 flex flex-col gap-4">
+        <div class="glassmorphism p-4 rounded-xl">
+          <div class="flex justify-between items-center mb-2">
+            <select 
+              [(ngModel)]="selectedLanguage" 
+              (ngModelChange)="onLanguageChange()" 
+              class="glassmorphism-input py-2 px-4"
+              name="language"
+            >
+              <option value="cpp">C++</option>
+              <option value="javascript">JavaScript</option>
+              <option value="python">Python</option>
+              <option value="java">Java</option>
+            </select>
+            <div class="flex gap-2">
               <button 
                 (click)="runCode()" 
                 class="glassmorphism-button py-2 px-4"
                 [disabled]="isRunning"
               >
-                <span class="text-black">{{ isRunning ? 'Running...' : 'Run Code' }}</span>
-                <fa-icon [icon]="['fas', 'arrow-right']" class="text-lg glassmorphism-icon"></fa-icon>
+                {{ isRunning ? 'Running...' : 'Run Code' }}
               </button>
               <button 
                 (click)="saveCode()" 
                 class="glassmorphism-button py-2 px-4"
-                [disabled]="isSaving || !filename"
+                [disabled]="isSaving"
               >
-                <span class="text-black">{{ isSaving ? 'Saving...' : 'Save Code' }}</span>
-                <fa-icon [icon]="['fas', 'save']" class="text-lg glassmorphism-icon"></fa-icon>
+                {{ isSaving ? 'Saving...' : 'Save Code' }}
               </button>
             </div>
-            <input 
-              [(ngModel)]="filename" 
-              placeholder="Enter filename (e.g., mycode.cpp)" 
-              class="glassmorphism-input w-full py-2 px-4"
-              name="filename"
-              (input)="onFilenameChange()"
-            >
           </div>
-          <div class="mt-4">
+          <input 
+            [(ngModel)]="filename" 
+            (ngModelChange)="onFilenameChange()" 
+            placeholder="Enter filename" 
+            class="glassmorphism-input w-full py-2 px-4 mb-2"
+            name="filename"
+          >
+          <div #editorContainer class="h-[400px] w-full"></div>
+          <div class="mt-2">
             <textarea 
               [(ngModel)]="userInput" 
-              placeholder="Enter input for your program..." 
-              class="glassmorphism-input w-full h-[100px] p-4 resize-none"
+              placeholder="Enter input for your program (if any)" 
+              class="glassmorphism-input w-full h-20 p-4 resize-none"
               name="userInput"
             ></textarea>
           </div>
-          <div class="glassmorphism p-4 rounded-xl mt-4 overflow-auto">
-            <h3 class="text-xl font-bold text-white mb-2">Output</h3>
-            <pre class="text-white whitespace-pre-wrap">{{ output }}</pre>
-            <div *ngIf="error" class="text-red-500 mt-2">{{ error }}</div>
-            <div *ngIf="saveMessage" class="text-green-500 mt-2">{{ saveMessage }}</div>
+          <div *ngIf="output || error" class="mt-2">
+            <h4 class="text-lg font-bold text-white">Output:</h4>
+            <pre class="text-white">{{ output }}</pre>
+            <pre class="text-red-500">{{ error }}</pre>
           </div>
+          <div *ngIf="saveMessage" class="text-green-500">{{ saveMessage }}</div>
         </div>
       </div>
     </div>
@@ -1039,6 +1111,16 @@ class CodeComponent implements OnInit, AfterViewInit {
   filename: string = '';
   savedFiles: SavedFile[] = [];
   selectedFileId: string | null = null;
+  showUsersList: boolean = false;
+
+  private socket: any;
+  roomId: string | null = null;
+  roomUsers: { _id: string; username: string }[] = [];
+  isCreator: boolean = false;
+  roomError: string = '';
+  roomIdInput: string = '';
+  creatorId: string = '';
+
   private apiUrl = 'http://localhost:5000/api';
 
   constructor(
@@ -1052,13 +1134,14 @@ class CodeComponent implements OnInit, AfterViewInit {
       this.toastr.info('CodeComponent loaded', 'Debug');
     }, 1000);
     this.titleService.setTitle('CodeCraft - Code Editor');
+    this.socket = io('http://localhost:5000', { transports: ['websocket'] });
   }
 
   ngOnInit() {
     const token = localStorage.getItem('token');
     this.username = localStorage.getItem('username') || '';
     const role = localStorage.getItem('role') || 'user';
-
+  
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
@@ -1066,7 +1149,138 @@ class CodeComponent implements OnInit, AfterViewInit {
       this.router.navigate(['/admin']);
     } else {
       this.fetchSavedFiles();
+      this.initializeSocketListeners();
+      const decoded: any = jwtDecode(token);
+      this.creatorId = decoded._id;
     }
+  }
+
+  private initializeSocketListeners() {
+    this.socket.on('userJoined', ({ roomId, user }: { roomId: string; user: User }) => {
+      if (this.roomId === roomId) {
+        this.roomUsers = [...this.roomUsers, user];
+        this.toastr.info(`${user.username} joined the room`, 'User Joined');
+      }
+    });
+  
+    this.socket.on('userLeft', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
+      if (this.roomId === roomId) {
+        this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
+        this.toastr.info(`${username} left the room`, 'User Left');
+      }
+    });
+  
+    this.socket.on('userKicked', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
+      if (this.roomId === roomId) {
+        if (userId === this.creatorId) {
+          this.leaveRoom();
+          this.toastr.error('You were kicked from the room', 'Kicked');
+        } else {
+          this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
+          this.toastr.info(`${username} was kicked from the room`, 'User Kicked');
+        }
+      }
+    });
+  }
+  createRoom() {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    this.http.post<{ roomId: string }>(`${this.apiUrl}/rooms/create`, {}, {
+      headers: { 'x-auth-token': token }
+    }).subscribe({
+      next: (response) => {
+        this.roomId = response.roomId;
+        this.isCreator = true;
+        this.roomUsers = [{ _id: this.creatorId, username: this.username }];
+        this.socket.emit('joinRoom', { roomId: this.roomId, user: { _id: this.creatorId, username: this.username } });
+        this.toastr.success(`Room created: ${this.roomId}`, 'Success');
+        this.roomError = '';
+      },
+      error: (error) => {
+        this.roomError = error.error?.message || 'Failed to create room';
+        this.toastr.error(this.roomError, 'Error');
+      }
+    });
+  }
+  
+  joinRoom() {
+    if (!this.roomIdInput) {
+      this.roomError = 'Please enter a room ID';
+      this.toastr.error(this.roomError, 'Error');
+      return;
+    }
+  
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    this.http.post<{ room: Room }>(`${this.apiUrl}/rooms/join`, { roomId: this.roomIdInput }, {
+      headers: { 'x-auth-token': token }
+    }).subscribe({
+      next: (response) => {
+        this.roomId = response.room.roomId;
+        this.isCreator = response.room.creatorId === this.creatorId;
+        this.roomUsers = response.room.users;
+        this.socket.emit('joinRoom', { roomId: this.roomId, user: { _id: this.creatorId, username: this.username } });
+        this.toastr.success(`Joined room: ${this.roomId}`, 'Success');
+        this.roomError = '';
+        this.roomIdInput = '';
+      },
+      error: (error) => {
+        this.roomError = error.error?.message || 'Failed to join room';
+        this.toastr.error(this.roomError, 'Error');
+      }
+    });
+  }
+  
+  leaveRoom() {
+    if (this.roomId) {
+      this.socket.emit('leaveRoom', { roomId: this.roomId, userId: this.creatorId, username: this.username });
+      this.roomId = null;
+      this.isCreator = false;
+      this.roomUsers = [];
+      this.roomError = '';
+      this.toastr.info('You left the room', 'Info');
+    }
+  }
+  
+  kickUser(userId: string) {
+    if (!this.isCreator) {
+      this.toastr.error('Only the room creator can kick users', 'Error');
+      return;
+    }
+  
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    const username = this.roomUsers.find(u => u._id === userId)?.username || 'User';
+    this.http.post(`${this.apiUrl}/rooms/kick`, { roomId: this.roomId, userId }, {
+      headers: { 'x-auth-token': token }
+    }).subscribe({
+      next: () => {
+        this.socket.emit('kickUser', { roomId: this.roomId, userId, username });
+        this.toastr.success(`Kicked ${username} from the room`, 'Success');
+      },
+      error: (error) => {
+        this.toastr.error(error.error?.message || 'Failed to kick user', 'Error');
+      }
+    });
+  }
+
+  toggleUsersList() {
+    this.showUsersList = !this.showUsersList;
   }
 
   ngAfterViewInit() {
