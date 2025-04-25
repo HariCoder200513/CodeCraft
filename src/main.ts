@@ -723,7 +723,7 @@ class AdminComponent implements OnInit {
   username: string = '';
   users: User[] = [];
   isLoading: boolean = false;
-  private apiUrl = 'http://localhost:5000/api/auth';
+  private apiUrl = 'http://localhost:5000/api';
   selectedUserFiles: { [userId: string]: SavedFile[] } = {};
   showFiles: { [userId: string]: boolean } = {};
   selectedFileContent: string | null = null;
@@ -760,8 +760,7 @@ class AdminComponent implements OnInit {
 
   fetchUsers(token: string) {
     this.isLoading = true;
-
-    this.http.get<User[]>(`${this.apiUrl}/users`, {
+    this.http.get<User[]>(`${this.apiUrl}/auth/users`, {
       headers: { 'x-auth-token': token }
     }).pipe(
       catchError(error => {
@@ -841,19 +840,31 @@ class AdminComponent implements OnInit {
       this.router.navigate(['/login']);
       return;
     }
-
+  
     this.isLoading = true;
     this.http.get<SavedFile[]>(`${this.apiUrl}/files/user/${userId}`, {
       headers: { 'x-auth-token': token }
     }).subscribe({
       next: (files) => {
-        this.selectedUserFiles[userId] = files;
+        this.selectedUserFiles[userId] = files || []; // Ensure empty array if no files
         this.isLoading = false;
-        this.toastr.success(`Retrieved files for user ${userId}`, 'Success');
+        if (files.length === 0) {
+          this.toastr.info(`No files found for user ${userId}`, 'Info');
+        } else {
+          this.toastr.success(`Retrieved ${files.length} files for user ${userId}`, 'Success');
+        }
       },
       error: (error) => {
         this.isLoading = false;
-        this.toastr.error(error.error?.message || 'Failed to retrieve user files', 'Error');
+        console.error('Fetch user files error:', error); // Log detailed error
+        const errorMessage = error.error?.message || 'Failed to retrieve user files';
+        this.toastr.error(errorMessage, 'Error');
+        if (error.status === 401 || error.status === 403) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          localStorage.removeItem('role');
+          this.router.navigate(['/login']);
+        }
       }
     });
   }
