@@ -941,7 +941,7 @@ class AdminComponent implements OnInit {
             <h3 class="text-xl font-bold text-white mb-2">Saved Files</h3>
             <div *ngIf="isLoadingFiles" class="text-white">Loading files...</div>
             <div *ngIf="!isLoadingFiles && savedFiles.length === 0" class="text-white">No saved files</div>
-            <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2">
+            <ul *ngIf="!isLoadingFiles && savedFiles.length > 0" class="space-y-2 text-white">
   <li *ngFor="let file of savedFiles" 
       class="glassmorphism p-2 rounded cursor-pointer hover:bg-white hover:bg-opacity-20"
       [class.bg-white]="selectedFileId === file._id"
