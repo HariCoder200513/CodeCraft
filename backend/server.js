@@ -444,6 +444,33 @@ authRoutes.get('/github/callback',
 // File Routes
 const fileRoutes = express.Router();
 
+fileRoutes.get('/user/:userId', adminAuth, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const files = await File.find({ userId }).sort({ updatedAt: -1 });
+    res.json(files);
+  } catch (error) {
+    console.error('Error fetching user files:', error);
+    res.status(500).json({ message: 'Failed to fetch user files: ' + error.message });
+  }
+});
+
+fileRoutes.delete('/admin/delete/:fileId', adminAuth, async (req, res) => {
+  try {
+    const fileId = req.params.fileId;
+    const file = await File.findByIdAndDelete(fileId);
+    if (!file) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+    console.log(`File deleted by admin: ${file.filename} (ID: ${fileId})`);
+    res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting file by admin:', error);
+    res.status(500).json({ message: 'Failed to delete file: ' + error.message });
+  }
+});
+
+
 fileRoutes.post('/save', auth, async (req, res) => {
   try {
     const { filename, language, code, fileId } = req.body;

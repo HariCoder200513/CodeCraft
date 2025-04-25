@@ -23,6 +23,7 @@ interface SavedFile {
   _id: string;
   filename: string;
   language: string;
+  code: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -617,7 +618,7 @@ class AuthComponent implements AfterViewInit, OnInit {
         <h2 class="text-3xl font-bold text-white mb-4">User Management</h2>
         <div *ngIf="isLoading" class="text-white">Loading users...</div>
         <div *ngIf="!isLoading && users.length === 0" class="text-white">No users found</div>
-        <div *ngIf="!isLoading && users.length > 0" class="overflow-x-auto">
+        <div *ngIf="!isLoading && users.length > 0" class="overflow-x-auto text-white">
           <table class="w-full text-left">
             <thead>
               <tr class="text-gray-300">
@@ -629,24 +630,90 @@ class AuthComponent implements AfterViewInit, OnInit {
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let user of users" class="border-t border-gray-600">
-                <td class="p-2">{{ user.email }}</td>
-                <td class="p-2">{{ user.username || 'N/A' }}</td>
-                <td class="p-2">{{ user.role }}</td>
-                <td class="p-2">{{ user.createdAt | date:'medium' }}</td>
-                <td class="p-2">
-                  <button 
-                    (click)="deleteUser(user._id)" 
-                    class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm"
-                    title="Delete User"
-                  >
-                    <fa-icon [icon]="['fas', 'trash-can']" class="text-lg"></fa-icon>
-                    Delete
-                  </button>
-                </td>
-              </tr>
+              <ng-container *ngFor="let user of users">
+                <tr class="border-t border-gray-600">
+                  <td class="p-2">{{ user.email }}</td>
+                  <td class="p-2 text-white">{{ user.username || 'N/A' }}</td>
+                  <td class="p-2">{{ user.role }}</td>
+                  <td class="p-2">{{ user.createdAt | date:'medium' }}</td>
+                  <td class="p-2 flex gap-2">
+                    <button 
+                      (click)="deleteUser(user._id)" 
+                      class="glassmorphism-button bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm"
+                      title="Delete User"
+                    >
+                      <fa-icon [icon]="['fas', 'trash-can']" class="text-lg"></fa-icon>
+                      Delete
+                    </button>
+                    <button 
+                      (click)="toggleUserFiles(user._id)" 
+                      class="glassmorphism-button bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm"
+                      title="View User Files"
+                    >
+                      {{ showFiles[user._id] ? 'Hide Files' : 'View Files' }}
+                    </button>
+                  </td>
+                </tr>
+                <tr *ngIf="showFiles[user._id]" class="border-t border-gray-600">
+                  <td colspan="5" class="p-2">
+                    <div class="glassmorphism p-4 rounded-xl">
+                      <h3 class="text-xl font-bold text-white mb-2">Files for {{ user.email }}</h3>
+                      <div *ngIf="selectedUserFiles[user._id].length === 0" class="text-white">No files found</div>
+                      <ul *ngIf="selectedUserFiles[user._id].length > 0" class="space-y-2">
+                        <li *ngFor="let file of selectedUserFiles[user._id]" class="glassmorphism p-2 rounded">
+                          <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                              <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
+                              <span>{{ file.filename }}</span>
+                            </div>
+                            <div class="flex gap-2">
+                              <button 
+                                (click)="viewFile(file)" 
+                                class="glassmorphism-button bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-sm"
+                                title="View File"
+                              >
+                                View
+                              </button>
+                              <button 
+                                (click)="deleteUserFile(file._id, user._id)" 
+                                class="glassmorphism-button bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm"
+                                title="Delete File"
+                              >
+                                <fa-icon [icon]="['fas', 'trash-can']" class="text-lg"></fa-icon>
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                          <div class="text-sm text-gray-400">
+                            {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
+                          </div>
+                        </li>
+                      </ul>
+                    </div>
+                  </td>
+                </tr>
+              </ng-container>
             </tbody>
           </table>
+        </div>
+      </div>
+      <!-- File View Modal -->
+      <div *ngIf="selectedFileContent" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="glassmorphism p-6 rounded-xl max-w-3xl w-full max-h-[80vh] overflow-auto">
+          <h3 class="text-2xl font-bold text-white mb-4">{{ selectedFileName }}</h3>
+          <textarea 
+            [value]="selectedFileContent" 
+            readonly 
+            class="glassmorphism-input w-full h-[60vh] p-4 resize-none"
+          ></textarea>
+          <div class="flex justify-end mt-4">
+            <button 
+              (click)="closeFileView()" 
+              class="glassmorphism-button bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -657,6 +724,10 @@ class AdminComponent implements OnInit {
   users: User[] = [];
   isLoading: boolean = false;
   private apiUrl = 'http://localhost:5000/api/auth';
+  selectedUserFiles: { [userId: string]: SavedFile[] } = {};
+  showFiles: { [userId: string]: boolean } = {};
+  selectedFileContent: string | null = null;
+  selectedFileName: string | null = null;
 
   constructor(
     private router: Router,
@@ -747,6 +818,75 @@ class AdminComponent implements OnInit {
       next: () => {
         this.users = this.users.filter(user => user._id !== userId);
         this.toastr.success('User deleted successfully!', 'Success');
+      }
+    });
+  }
+
+  toggleUserFiles(userId: string) {
+    if (this.showFiles[userId]) {
+      this.showFiles[userId] = false;
+    } else {
+      if (!this.selectedUserFiles[userId]) {
+        this.selectedUserFiles[userId] = [];
+      }
+      this.fetchUserFiles(userId);
+      this.showFiles[userId] = true;
+    }
+  }
+
+  fetchUserFiles(userId: string) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.isLoading = true;
+    this.http.get<SavedFile[]>(`${this.apiUrl}/files/user/${userId}`, {
+      headers: { 'x-auth-token': token }
+    }).subscribe({
+      next: (files) => {
+        this.selectedUserFiles[userId] = files;
+        this.isLoading = false;
+        this.toastr.success(`Retrieved files for user ${userId}`, 'Success');
+      },
+      error: (error) => {
+        this.isLoading = false;
+        this.toastr.error(error.error?.message || 'Failed to retrieve user files', 'Error');
+      }
+    });
+  }
+
+  viewFile(file: SavedFile) {
+    this.selectedFileContent = file.code;
+    this.selectedFileName = file.filename;
+  }
+
+  closeFileView() {
+    this.selectedFileContent = null;
+    this.selectedFileName = null;
+  }
+
+  deleteUserFile(fileId: string, userId: string) {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    this.http.delete(`${this.apiUrl}/files/admin/delete/${fileId}`, {
+      headers: { 'x-auth-token': token }
+    }).subscribe({
+      next: () => {
+        this.selectedUserFiles[userId] = this.selectedUserFiles[userId].filter(file => file._id !== fileId);
+        this.toastr.success('File deleted successfully!', 'Success');
+      },
+      error: (error) => {
+        this.toastr.error(error.error?.message || 'Failed to delete file', 'Error');
       }
     });
   }
