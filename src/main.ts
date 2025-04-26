@@ -661,14 +661,15 @@ class AuthComponent implements AfterViewInit, OnInit {
       <div class="w-full glassmorphism p-6 rounded-xl">
         <h2 class="text-3xl font-bold text-white mb-4">User Management</h2>
         <div *ngIf="isLoading" class="text-white">Loading users...</div>
-        <div *ngIf="!isLoading && users.length === 0" class="text-white">No users found</div>
+        <div *ngIf="!isLoading && users.length === 0" class="text-white">
+          {{ hasOnlyAdmin ? 'Only the admin user exists. No other users to display.' : 'No non-admin users found.' }}
+        </div>
         <div *ngIf="!isLoading && users.length > 0" class="overflow-x-auto text-white">
           <table class="w-full text-left">
             <thead>
               <tr class="text-gray-300">
                 <th class="p-2">Email</th>
                 <th class="p-2">Username</th>
-                <th class="p-2">Role</th>
                 <th class="p-2">Created At</th>
                 <th class="p-2">Actions</th>
               </tr>
@@ -678,7 +679,6 @@ class AuthComponent implements AfterViewInit, OnInit {
                 <tr class="border-t border-gray-600">
                   <td class="p-2">{{ user.email }}</td>
                   <td class="p-2 text-white">{{ user.username || 'N/A' }}</td>
-                  <td class="p-2">{{ user.role }}</td>
                   <td class="p-2">{{ user.createdAt | date:'medium' }}</td>
                   <td class="p-2 flex gap-2">
                     <button 
@@ -699,7 +699,7 @@ class AuthComponent implements AfterViewInit, OnInit {
                   </td>
                 </tr>
                 <tr *ngIf="showFiles[user._id]" class="border-t border-gray-600">
-                  <td colspan="5" class="p-2">
+                  <td colspan="4" class="p-2">
                     <div class="glassmorphism p-4 rounded-xl">
                       <h3 class="text-xl font-bold text-white mb-2">Files for {{ user.email }}</h3>
                       <div *ngIf="selectedUserFiles[user._id].length === 0" class="text-white">No files found</div>
@@ -767,6 +767,7 @@ class AdminComponent implements OnInit {
   username: string = '';
   users: User[] = [];
   isLoading: boolean = false;
+  hasOnlyAdmin: boolean = false;
   private apiUrl = 'http://localhost:5000/api'
   selectedUserFiles: { [userId: string]: SavedFile[] } = {};
   showFiles: { [userId: string]: boolean } = {};
@@ -802,12 +803,15 @@ class AdminComponent implements OnInit {
     this.fetchUsers(token);
   }
 
+  
+
   fetchUsers(token: string) {
     this.isLoading = true;
     this.http.get<User[]>(`${this.apiUrl}/auth/users`, {
       headers: { 'x-auth-token': token }
     }).pipe(
       catchError(error => {
+        console.error('Fetch users error details:', error);
         if (error.status === 401 || error.status === 403) {
           this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
           localStorage.removeItem('token');
@@ -822,15 +826,29 @@ class AdminComponent implements OnInit {
       })
     ).subscribe({
       next: (users) => {
-        this.users = users;
+        console.log('Raw users from backend:', users); // Log raw data for debugging
+        // Filter out the admin user
+        this.users = users.filter(user => user.email !== 'admin@codecraft.com');
         this.isLoading = false;
-        this.toastr.success('Users retrieved successfully!', 'Success');
+        if (this.users.length === 0) {
+          // Check if the only user is the admin
+          const hasOnlyAdmin = users.length > 0 && users.every(user => user.email === 'admin@codecraft.com');
+          if (hasOnlyAdmin) {
+            this.toastr.info('Only the admin user exists. No other users to display.', 'Info');
+          } else {
+            this.toastr.info('No non-admin users found.', 'Info');
+          }
+        } else {
+          this.toastr.success('Users retrieved successfully!', 'Success');
+        }
       },
       error: () => {
         this.isLoading = false;
       }
     });
   }
+
+  
 
   deleteUser(userId: string) {
     if (!confirm('Are you sure you want to delete this user?')) return;
@@ -900,7 +918,7 @@ class AdminComponent implements OnInit {
       headers: { 'x-auth-token': token }
     }).subscribe({
       next: (files) => {
-        this.selectedUserFiles[userId] = files || []; // Ensure empty array if no files
+        this.selectedUserFiles[userId] = files || [];
         this.isLoading = false;
         if (files.length === 0) {
           this.toastr.info(`No files found for user ${userId}`, 'Info');
@@ -910,14 +928,17 @@ class AdminComponent implements OnInit {
       },
       error: (error) => {
         this.isLoading = false;
-        console.error('Fetch user files error:', error); // Log detailed error
-        const errorMessage = error.error?.message || 'Failed to retrieve user files';
-        this.toastr.error(errorMessage, 'Error');
+        console.error('Fetch user files error:', error);
         if (error.status === 401 || error.status === 403) {
+          this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
           localStorage.removeItem('token');
           localStorage.removeItem('username');
           localStorage.removeItem('role');
           this.router.navigate(['/login']);
+        } else if (error.status === 404) {
+          this.toastr.error(`User files not found for ${userId}`, 'Error');
+        } else {
+          this.toastr.error('Failed to fetch files: ' + (error.error?.message || 'Unknown error'), 'Error');
         }
       }
     });

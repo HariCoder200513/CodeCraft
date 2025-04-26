@@ -52,6 +52,9 @@ const io = new Server(server, {
 });
 
 // File Schema (assuming it was defined elsewhere but not shown)
+
+
+
 const FileSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -533,6 +536,17 @@ passport.use(new GitHubStrategy({
 // Authentication Routes
 const authRoutes = express.Router();
 
+authRoutes.get('/users', adminAuth, async (req, res) => {
+  try {
+    const users = await User.find().select('-password -secretAnswer'); // Exclude sensitive fields
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ message: 'Failed to fetch users: ' + error.message });
+  }
+});
+
+
 authRoutes.post('/signup', async (req, res) => {
   try {
     const { email, password, secretQuestion, secretAnswer } = req.body;
@@ -689,6 +703,17 @@ fileRoutes.post('/save', auth, async (req, res) => {
   }
 });
 
+fileRoutes.get('/user/:userId', adminAuth, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const files = await File.find({ userId }).sort({ updatedAt: -1 });
+    res.json(files);
+  } catch (error) {
+    console.error('Error fetching user files:', error);
+    res.status(500).json({ message: 'Failed to fetch user files: ' + error.message });
+  }
+});
+
 fileRoutes.get('/list', auth, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -700,42 +725,31 @@ fileRoutes.get('/list', auth, async (req, res) => {
   }
 });
 
-fileRoutes.delete('/delete/:fileId', auth, async (req, res) => {
+fileRoutes.delete('/admin/delete/:fileId', adminAuth, async (req, res) => {
   try {
     const fileId = req.params.fileId;
-    const userId = req.user._id;
-
     const file = await File.findById(fileId);
     if (!file) {
       return res.status(404).json({ message: 'File not found' });
     }
 
-    // Check if the user is in the same room as the file owner
-    const room = await Room.findOne({
-      roomId: { $in: (await Room.find({ users: { $elemMatch: { _id: userId } } })).map(r => r.roomId) },
-      users: { $elemMatch: { _id: file.userId } }
-    });
-
-    if (!room) {
-      return res.status(403).json({ message: 'Permission denied. You must be in the same room as the file owner to delete this file.' });
-    }
-
-    // Delete the file
+    // Delete the file (admin has permission to delete any file)
     await File.findByIdAndDelete(fileId);
 
-    // Emit a fileDeleted event to all users in the room
-    io.to(room.roomId).emit('fileDeleted', {
-      roomId: room.roomId,
-      fileId,
-      filename: file.filename,
-      userId: file.userId,
-      deletedBy: req.user.username || req.user.email.split('@')[0]
-    });
+    // Emit a fileDeleted event to all users in the room (if applicable)
+    const rooms = await Room.find({ users: { $elemMatch: { _id: file.userId } } });
+    for (const room of rooms) {
+      io.to(room.roomId).emit('fileDeleted', {
+        roomId: room.roomId,
+        fileId,
+        filename: file.filename,
+        deletedBy: req.user.username || req.user.email.split('@')[0]
+      });
+    }
 
-    console.log(`File deleted: ${file.filename} (ID: ${fileId}) by user: ${userId}`);
     res.json({ message: 'File deleted successfully' });
   } catch (error) {
-    console.error('Error deleting file:', error);
+    console.error('Error deleting file as admin:', error);
     res.status(500).json({ message: 'Failed to delete file: ' + error.message });
   }
 });
@@ -934,6 +948,73 @@ app.post('/api/run', auth, async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/rooms', roomRoutes);
+
+const userRoutes = express.Router();
+
+userRoutes.delete('/:userId', adminAuth, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+
+    // Check if the user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Prevent admin from deleting themselves
+    if (userId === req.user._id) {
+      return res.status(403).json({ message: 'Admins cannot delete themselves' });
+    }
+
+    // Delete the user
+    await User.findByIdAndDelete(userId);
+
+    // Delete all files associated with the user
+    const files = await File.find({ userId });
+    if (files.length > 0) {
+      await File.deleteMany({ userId });
+
+      // Emit fileDeleted events for each file to rooms the user is in
+      const rooms = await Room.find({ users: { $elemMatch: { _id: userId } } });
+      for (const room of rooms) {
+        for (const file of files) {
+          io.to(room.roomId).emit('fileDeleted', {
+            roomId: room.roomId,
+            fileId: file._id,
+            filename: file.filename,
+            deletedBy: req.user.username || req.user.email.split('@')[0]
+          });
+        }
+      }
+    }
+
+    // Remove the user from any rooms they are in
+    const rooms = await Room.find({ users: { $elemMatch: { _id: userId } } });
+    for (const room of rooms) {
+      room.users = room.users.filter(u => u._id.toString() !== userId);
+      await room.save();
+      io.to(room.roomId).emit('userLeft', {
+        roomId: room.roomId,
+        userId,
+        username: user.username || user.email.split('@')[0],
+        users: room.users
+      });
+
+      if (room.users.length === 0) {
+        await Room.deleteOne({ roomId: room.roomId });
+        console.log(`Room deleted (empty after user deletion): ${room.roomId}`);
+      }
+    }
+
+    res.json({ message: 'User and associated files deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ message: 'Failed to delete user: ' + error.message });
+  }
+});
+
+// Use User Routes
+app.use('/api/users', userRoutes);
 
 // Global Error Handling Middleware
 
