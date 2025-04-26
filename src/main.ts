@@ -13,7 +13,7 @@ import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { jwtDecode } from 'jwt-decode';
 import { FontAwesomeModule, FaIconLibrary } from '@fortawesome/angular-fontawesome';
-import { faEnvelope, faLock, faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle,faTrashCan } from '@fortawesome/free-solid-svg-icons';
+import { faEnvelope, faLock, faShareAlt ,faArrowRight, faSignOutAlt, faSave, faFolderOpen, faQuestionCircle,faTrashCan } from '@fortawesome/free-solid-svg-icons';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Title } from '@angular/platform-browser';
 import { enableProdMode } from '@angular/core';
@@ -593,6 +593,8 @@ class AuthComponent implements AfterViewInit, OnInit {
     });
   }
 
+  
+
   onForgotPasswordSubmit() {
     console.log('Forgot password submitted:', this.email);
     this.forgotPassword(this.email, this.secretQuestion, this.secretAnswer).subscribe({
@@ -1059,11 +1061,23 @@ class AdminComponent implements OnInit {
                   <fa-icon [icon]="['fas', 'folder-open']" class="text-lg text-white"></fa-icon>
                   <span>{{ file.filename }}</span>
                 </div>
-                <button (click)="deleteFile(file._id)" 
-                        class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
-                        title="Delete File">
-                  🗑️ Delete
-                </button>
+                <div class="flex items-center gap-2">
+                  <button 
+                    *ngIf="roomId" 
+                    (click)="shareCode(file._id)" 
+                    class="glassmorphism-button text-yellow-400 hover:text-yellow-600 bg-yellow-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
+                    title="Share to Code Together"
+                  >
+                    <fa-icon [icon]="['fas', 'share-alt']" class="text-sm"></fa-icon> Share
+                  </button>
+                  <button 
+                    (click)="deleteFile(file._id)" 
+                    class="glassmorphism-button text-red-400 hover:text-red-600 bg-red-500 bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-sm transition-all" 
+                    title="Delete File"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
               </div>
               <div class="text-sm text-gray-400">
                 {{ file.language | titlecase }} • {{ file.updatedAt | date:'short' }}
@@ -1132,7 +1146,7 @@ class AdminComponent implements OnInit {
     </div>
   `
 })
-class CodeComponent implements OnInit, AfterViewInit {
+export class CodeComponent implements OnInit, AfterViewInit {
   @ViewChild('editorContainer', { static: false }) editorContainer!: ElementRef<HTMLDivElement>;
   username: string = '';
   selectedLanguage: string = 'cpp';
@@ -1157,6 +1171,7 @@ class CodeComponent implements OnInit, AfterViewInit {
   roomError: string = '';
   roomIdInput: string = '';
   creatorId: string = '';
+  isLoggingOut: boolean = false; // Flag to track logout intent
 
   private apiUrl = 'http://localhost:5000/api';
 
@@ -1167,12 +1182,14 @@ class CodeComponent implements OnInit, AfterViewInit {
     private toastr: ToastrService,
     private clipboard: Clipboard
   ) {
-    console.log('CodeComponent initialized, ToastrService injected');
-    setTimeout(() => {
-      this.toastr.info('CodeComponent loaded', 'Debug');
-    }, 1000);
+    const token = localStorage.getItem('token');
+    this.socket = io('http://localhost:5000', {
+      transports: ['websocket'],
+      query: {
+        token: token || ''
+      }
+    });
     this.titleService.setTitle('CodeCraft - Code Editor');
-    this.socket = io('http://localhost:5000', { transports: ['websocket'] });
   }
 
   ngOnInit() {
@@ -1193,23 +1210,127 @@ class CodeComponent implements OnInit, AfterViewInit {
     }
   }
 
+  ngOnDestroy() {
+    // Only leave the room if the user hasn't already done so manually
+    if (this.roomId && !this.isLoggingOut) {
+      this.leaveRoom();
+    }
+  }
+
+  
+
+  shareCode(fileId: string) {
+    if (!this.roomId) {
+      this.toastr.error('You must be in a room to share code', 'Error');
+      return;
+    }
+  
+    const token = localStorage.getItem('token');
+    if (!token) {
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    let userId: string;
+    try {
+      const decoded: any = jwtDecode(token);
+      userId = decoded._id;
+      if (!userId) {
+        throw new Error('User ID not found in token');
+      }
+    } catch (error) {
+      this.toastr.error('Invalid token. Please log in again.', 'Error');
+      this.router.navigate(['/login']);
+      return;
+    }
+  
+    // Prompt to confirm sharing
+    if (!confirm('Do you want to share this code?')) {
+      this.toastr.info('Sharing cancelled', 'Info');
+      return;
+    }
+  
+    this.http.get(`${this.apiUrl}/files/${fileId}`, { headers: { 'x-auth-token': token } })
+      .subscribe({
+        next: (file: any) => {
+          if (!file) {
+            this.toastr.error('File not found', 'Error');
+            return;
+          }
+          const { filename, language, code } = file;
+  
+          // Check if the file exists for other users in the room
+          this.socket.emit('checkFileExists', { roomId: this.roomId, filename }, (exists: boolean) => {
+            if (exists) {
+              if (confirm(`A file named "${filename}" already exists for other users. Do you want to overwrite it?`)) {
+                this.socket.emit('shareCode', {
+                  roomId: this.roomId,
+                  fileId,
+                  filename,
+                  language,
+                  code,
+                  userId,
+                  username: this.username,
+                  overwrite: true
+                }, (response: any) => {
+                  if (response && response.error) {
+                    this.toastr.error(response.error, 'Error');
+                  } else {
+                    this.toastr.success('Code shared with room', 'Success');
+                  }
+                });
+              } else {
+                this.toastr.info('Sharing cancelled', 'Info');
+              }
+            } else {
+              this.socket.emit('shareCode', {
+                roomId: this.roomId,
+                fileId,
+                filename,
+                language,
+                code,
+                userId,
+                username: this.username,
+                overwrite: false
+              }, (response: any) => {
+                if (response && response.error) {
+                  this.toastr.error(response.error, 'Error');
+                } else {
+                  this.toastr.success('Code shared with room', 'Success');
+                }
+              });
+            }
+          });
+        },
+        error: (error) => {
+          if (error.status === 401) {
+            this.toastr.error('Session expired. Please log in again.', 'Error');
+            this.router.navigate(['/login']);
+          } else {
+            this.toastr.error('Failed to load file for sharing', 'Error');
+          }
+        }
+      });
+  }
+  
   private initializeSocketListeners() {
-    this.socket.on('userJoined', ({ roomId, user }: { roomId: string; user: User }) => {
+    this.socket.on('userJoined', ({ roomId, users }: { roomId: string; users: User[] }) => {
       if (this.roomId === roomId) {
-        this.roomUsers = [...this.roomUsers, user];
-        this.toastr.info(`${user.username} joined the room`, 'User Joined');
-        this.fetchSavedFiles(); // Sync files when a new user joins
+        this.roomUsers = users;
+        this.toastr.info(`User joined the room. Total users: ${this.roomUsers.length}`, 'User Joined');
+        this.fetchSavedFiles();
       }
     });
-
-    this.socket.on('userLeft', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
+  
+    this.socket.on('userLeft', ({ roomId, userId, username, users }: { roomId: string; userId: string; username: string; users: User[] }) => {
       if (this.roomId === roomId) {
-        this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
-        this.toastr.info(`${username} left the room`, 'User Left');
-        this.fetchSavedFiles(); // Sync files when a user leaves
+        this.roomUsers = users;
+        this.toastr.info(`${username} left the room. Total users: ${this.roomUsers.length}`, 'User Left');
+        this.fetchSavedFiles();
       }
     });
-
+  
     this.socket.on('userKicked', ({ roomId, userId, username }: { roomId: string; userId: string; username: string }) => {
       if (this.roomId === roomId) {
         if (userId === this.creatorId) {
@@ -1218,26 +1339,162 @@ class CodeComponent implements OnInit, AfterViewInit {
         } else {
           this.roomUsers = this.roomUsers.filter(u => u._id !== userId);
           this.toastr.info(`${username} was kicked from the room`, 'User Kicked');
-          this.fetchSavedFiles(); // Sync files when a user is kicked
+          this.fetchSavedFiles();
         }
       }
     });
-
-    this.socket.on('codeSaved', ({ roomId, filename, language, code }: { roomId: string; filename: string; language: string; code: string }) => {
-      if (this.roomId === roomId) {
-        // Update editor if the saved file matches the currently loaded file
-        if (this.filename === filename && this.editor) {
+  
+    this.socket.on('codeSaved', ({ roomId, fileId, filename, language, code, userId, username }: { roomId: string; fileId: string; filename: string; language: string; code: string; userId: string; username: string }) => {
+      if (this.roomId === roomId && userId !== this.creatorId) {
+        if (this.selectedFileId === fileId || this.filename === filename) {
           this.selectedLanguage = language;
           this.code = code;
-          this.editor.setValue(code);
-          (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), language);
-          this.toastr.info(`Code updated by another user in ${filename}`, 'Update');
+          this.filename = filename;
+          this.selectedFileId = fileId;
+          if (this.editor) {
+            this.editor.setValue(code);
+            (<any>window).monaco.editor.setModelLanguage(this.editor.getModel(), language);
+          }
+          this.toastr.success(`"${filename}" updated by ${username}`, 'Code Updated', {
+            timeOut: 5000,
+            tapToDismiss: true
+          });
+        } else {
+          const toastRef = this.toastr.info(`"${filename}" was updated by ${username}. Click to load.`, 'Code Updated', {
+            timeOut: 5000,
+            tapToDismiss: true,
+            onActivateTick: true
+          });
+          toastRef.onHidden.subscribe(() => {
+            if (toastRef.toastRef.componentInstance.wasClicked) {
+              this.loadFile(fileId);
+            }
+          });
         }
-        // Refresh saved files list for all users
         this.fetchSavedFiles();
       }
     });
+  
+    this.socket.on('codeShared', (data: any) => {
+      const { fileId, filename, language, code, userId, username, message } = data;
+    
+      if (userId === this.creatorId) {
+        // For the sharing user, update the editor with the original fileId
+        if (!this.editor) {
+          setTimeout(() => {
+            this.editor?.setValue(code);
+            this.filename = filename;
+            this.selectedLanguage = language;
+            this.selectedFileId = fileId;
+            this.saveMessage = message;
+            this.toastr.success(message, 'Code Shared');
+            this.fetchSavedFiles();
+          }, 100);
+        } else {
+          this.editor.setValue(code);
+          this.filename = filename;
+          this.selectedLanguage = language;
+          this.selectedFileId = fileId;
+          this.saveMessage = message;
+          this.toastr.success(message, 'Code Shared');
+          this.fetchSavedFiles();
+        }
+        return;
+      }
+    
+      // For receiving users, check if they already have a file with the same name
+      const token = localStorage.getItem('token');
+      if (!token) {
+        this.toastr.error('Authentication token not found. Please log in again.', 'Error');
+        return;
+      }
+    
+      this.http.get<SavedFile[]>(`${this.apiUrl}/files/list`, { headers: { 'x-auth-token': token } })
+        .subscribe({
+          next: (files) => {
+            const existingFile = files.find(f => f.filename === filename);
+            if (existingFile) {
+              if (confirm(`You already have a file named "${filename}". Do you want to overwrite it with the shared version?`)) {
+                this.http.post(`${this.apiUrl}/files/save`, 
+                  { 
+                    fileId: existingFile._id,
+                    filename,
+                    language,
+                    code
+                  },
+                  { headers: { 'x-auth-token': token } }
+                ).subscribe({
+                  next: () => {
+                    this.selectedFileId = existingFile._id;
+                    this.fetchSavedFiles();
+                    if (!this.editor) {
+                      setTimeout(() => {
+                        this.editor?.setValue(code);
+                        this.filename = filename;
+                        this.selectedLanguage = language;
+                        this.saveMessage = `Overwritten with shared code from ${username}`;
+                        this.toastr.success(`Code shared by ${username} (overwritten)`, 'Code Shared');
+                      }, 100);
+                    } else {
+                      this.editor.setValue(code);
+                      this.filename = filename;
+                      this.selectedLanguage = language;
+                      this.saveMessage = `Overwritten with shared code from ${username}`;
+                      this.toastr.success(`Code shared by ${username} (overwritten)`, 'Code Shared');
+                    }
+                  },
+                  error: (error) => {
+                    this.toastr.error('Failed to overwrite file', 'Error');
+                  }
+                });
+              } else {
+                this.toastr.info('Keeping existing file, shared code not applied', 'Info');
+              }
+            } else {
+              // Create a new file with the original filename and link to the shared fileId
+              this.http.post(`${this.apiUrl}/files/save`, 
+                { 
+                  filename,
+                  language,
+                  code,
+                  fileId: null // Create a new file
+                },
+                { headers: { 'x-auth-token': token } }
+              ).subscribe({
+                next: (response: any) => {
+                  const newFileId = response.fileId;
+                  this.selectedFileId = newFileId;
+                  this.fetchSavedFiles();
+                  if (!this.editor) {
+                    setTimeout(() => {
+                      this.editor?.setValue(code);
+                      this.filename = filename;
+                      this.selectedLanguage = language;
+                      this.saveMessage = `Received shared code from ${username}`;
+                      this.toastr.success(`Code shared by ${username}`, 'Code Shared');
+                    }, 100);
+                  } else {
+                    this.editor.setValue(code);
+                    this.filename = filename;
+                    this.selectedLanguage = language;
+                    this.saveMessage = `Received shared code from ${username}`;
+                    this.toastr.success(`Code shared by ${username}`, 'Code Shared');
+                  }
+                },
+                error: (error) => {
+                  this.toastr.error('Failed to save shared code locally', 'Error');
+                }
+              });
+            }
+          },
+          error: (error) => {
+            this.toastr.error('Failed to check existing files', 'Error');
+          }
+        });
+    });
   }
+  
+  
 
   createRoom() {
     const token = localStorage.getItem('token');
@@ -1406,6 +1663,7 @@ public class Main {
         if (error.status === 401) {
           this.toastr.error('Unauthorized: Invalid or expired token. Please log in again.', 'Error');
           localStorage.removeItem('token');
+          localStorage.removeItem('userId');
           localStorage.removeItem('username');
           this.router.navigate(['/login']);
         } else {
@@ -1467,14 +1725,14 @@ public class Main {
     this.isLoadingFiles = true;
     this.error = '';
     const token = localStorage.getItem('token');
-
+  
     if (!token) {
       this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.isLoadingFiles = false;
       this.router.navigate(['/login']);
       return;
     }
-
+  
     this.http.get<SavedFile[]>(`${this.apiUrl}/files/list`, {
       headers: { 'x-auth-token': token }
     }).pipe(
@@ -1483,7 +1741,6 @@ public class Main {
           this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
           this.toastr.error(this.error, 'Error');
           localStorage.removeItem('token');
-          localStorage.removeItem('username');
           this.router.navigate(['/login']);
         } else {
           this.error = error.error?.message || 'Error retrieving files';
@@ -1496,7 +1753,13 @@ public class Main {
       next: (files) => {
         this.savedFiles = files;
         this.isLoadingFiles = false;
-        this.toastr.success('Files retrieved successfully!', 'Success');
+        // Highlight the shared file in the list if it matches the current editor file
+        if (this.filename) {
+          const matchingFile = this.savedFiles.find(file => file.filename === this.filename);
+          if (matchingFile) {
+            this.selectedFileId = matchingFile._id;
+          }
+        }
       },
       error: () => {
         this.isLoadingFiles = false;
@@ -1526,6 +1789,7 @@ public class Main {
           this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
           this.toastr.error(this.error, 'Error');
           localStorage.removeItem('token');
+          localStorage.removeItem('userId');
           localStorage.removeItem('username');
           this.router.navigate(['/login']);
         } else {
@@ -1581,6 +1845,7 @@ public class Main {
           this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
           this.toastr.error(this.error, 'Error');
           localStorage.removeItem('token');
+          localStorage.removeItem('userId');
           localStorage.removeItem('username');
           this.router.navigate(['/login']);
         } else {
@@ -1608,70 +1873,51 @@ public class Main {
   }
 
   saveCode() {
-    console.log('Saving code:', this.filename);
-    if (!this.filename) {
-      this.error = 'Please enter a filename';
-      this.toastr.error(this.error, 'Error');
+    if (!this.selectedFileId) {
+      this.toastr.error('No file selected to save', 'Error');
       return;
     }
-
-    this.isSaving = true;
-    this.saveMessage = '';
-    this.error = '';
-
-    const codeToSave = this.editor.getValue();
+  
     const token = localStorage.getItem('token');
-
     if (!token) {
-      this.error = 'Authentication token not found. Please log in again.';
-      this.toastr.error(this.error, 'Error');
-      this.isSaving = false;
+      this.toastr.error('Authentication token not found. Please log in again.', 'Error');
       this.router.navigate(['/login']);
       return;
     }
-
-    this.http.post(`${this.apiUrl}/files/save`, 
-      { 
-        filename: this.filename, 
-        language: this.selectedLanguage, 
-        code: codeToSave 
-      },
-      { headers: { 'x-auth-token': token } }
-    ).pipe(
-      catchError(error => {
-        if (error.status === 401) {
-          this.error = 'Unauthorized: Invalid or expired token. Please log in again.';
-          this.toastr.error(this.error, 'Error');
-          localStorage.removeItem('token');
-          localStorage.removeItem('username');
-          this.router.navigate(['/login']);
-        } else {
-          this.error = error.error?.message || 'Error saving code';
-          this.toastr.error(this.error, 'Error');
+  
+    const data = {
+      fileId: this.selectedFileId,
+      filename: this.filename,
+      language: this.selectedLanguage,
+      code: this.editor ? this.editor.getValue() : this.code
+    };
+  
+    this.http.post(`${this.apiUrl}/files/save`, data, { headers: { 'x-auth-token': token } })
+      .subscribe({
+        next: (response: any) => {
+          this.saveMessage = response.message;
+          this.toastr.success(this.saveMessage, 'Success');
+          this.fetchSavedFiles();
+          if (this.roomId) {
+            this.socket.emit('codeSaved', {
+              roomId: this.roomId,
+              fileId: this.selectedFileId,
+              filename: this.filename,
+              language: this.selectedLanguage,
+              code: this.editor ? this.editor.getValue() : this.code,
+              userId: this.creatorId, // Use the original owner's userId
+              username: this.username
+            });
+          }
+        },
+        error: (error) => {
+          if (error.status === 403) {
+            this.toastr.error('Permission denied. You can only save your own files or shared files in the room.', 'Error');
+          } else {
+            this.toastr.error('Failed to save file', 'Error');
+          }
         }
-        this.isSaving = false;
-        return throwError(error);
-      })
-    ).subscribe({
-      next: (response: any) => {
-        this.saveMessage = response.message || 'Code saved successfully';
-        this.isSaving = false;
-        this.toastr.success(`File "${this.filename}" saved successfully!`, 'Success');
-        // Broadcast code save event to all users in the room, including sender
-        if (this.roomId) {
-          this.socket.emit('codeSaved', {
-            roomId: this.roomId,
-            filename: this.filename,
-            language: this.selectedLanguage,
-            code: codeToSave
-          });
-        }
-        this.fetchSavedFiles(); // Refresh files list for the current user
-      },
-      error: () => {
-        this.isSaving = false;
-      }
-    });
+      });
   }
 
   private loadMonacoEditor() {
@@ -1764,12 +2010,21 @@ public class Main {
   }
 
   signOut() {
+    if (this.roomId) {
+      this.isLoggingOut = true;
+      this.leaveRoom();
+    }
+
     if (confirm('Are you sure you want to sign out?')) {
       localStorage.removeItem('token');
+      localStorage.removeItem('userId');
       localStorage.removeItem('username');
       this.username = '';
       this.savedFiles = [];
       this.selectedFileId = null;
+      this.roomId = null;
+      this.isCreator = false;
+      this.roomUsers = [];
       this.toastr.info('Logged out successfully', 'Info');
       this.router.navigate(['/login']);
     }
