@@ -336,71 +336,134 @@ io.on('connection', (socket) => {
 
   socket.on('checkFileExists', async ({ roomId, filename }, callback) => {
     if (!socket.user || !socket.user._id) {
-      return callback({ error: 'Authentication required to check file existence' });
+      return callback(false);
     }
+    const userId = socket.user._id;
+  
     try {
       const room = await Room.findOne({ roomId });
       if (!room) {
         return callback(false);
       }
-      const users = room.users || [];
-      const existingFiles = await File.find({ filename, userId: { $in: users.map(u => u._id) } });
-      callback(existingFiles.length > 0);
+  
+      // Get all user IDs in the room except the sender
+      const otherUserIds = room.users
+        .map(user => user._id.toString())
+        .filter(id => id !== userId);
+  
+      // Check if any other user in the room has a file with the same filename
+      const fileExists = await File.findOne({
+        filename,
+        userId: { $in: otherUserIds }
+      });
+  
+      callback(!!fileExists); // Return true if file exists for another user, false otherwise
     } catch (error) {
       console.error('Error checking file existence:', error);
       callback(false);
     }
   });
 
-  socket.on('shareCode', async (data) => {
-    if (!socket.user || !socket.user._id) {
-      return socket.emit('error', { message: 'Authentication required to share code' });
+  // Map to store pending permission requests (userId -> callback)
+const pendingPermissionRequests = new Map();
+
+socket.on('requestOverwritePermission', async ({ roomId, filename, requestingUserId, requestingUsername }) => {
+  if (!socket.user || !socket.user._id) {
+    return socket.emit('error', { message: 'Authentication required' });
+  }
+  const userId = socket.user._id;
+
+  try {
+    const room = await Room.findOne({ roomId });
+    if (!room) {
+      return socket.emit('error', { message: 'Room not found' });
     }
-    const { roomId, fileId, filename, language, code, userId: clientUserId, username: clientUsername, overwrite } = data;
-    const userId = socket.user._id;
-    const username = socket.user.username || socket.user.email.split('@')[0];
-  
-    if (userId !== clientUserId) {
-      console.log(`User ID mismatch: socket.user._id=${userId}, clientUserId=${clientUserId}`);
-      return socket.emit('error', { message: 'User ID mismatch, authentication failed' });
-    }
-  
-    try {
-      const room = await Room.findOne({ roomId });
-      if (!room) {
-        return socket.emit('error', { message: 'Room not found' });
-      }
-  
-      let savedFile = await File.findById(fileId);
-      if (!savedFile || savedFile.userId.toString() !== userId) {
-        return socket.emit('error', { message: 'File not found or not authorized' });
-      }
-  
-      if (overwrite) {
-        // Update the existing file for the owner
-        savedFile = await File.findOneAndUpdate(
-          { _id: fileId, userId },
-          { language, code, updatedAt: Date.now() },
-          { new: true }
-        );
-      }
-  
-      // Broadcast the shared code to all users in the room
-      io.to(roomId).emit('codeShared', {
-        fileId: savedFile._id,
-        filename: savedFile.filename, // Use the original filename
-        language: savedFile.language,
-        code: savedFile.code,
-        userId,
-        username,
-        message: overwrite ? `${username} updated shared code` : `${username} shared new code`
+
+    // Check if the current user (socket.user) has a file with the same name
+    const existingFile = await File.findOne({ filename, userId });
+    if (!existingFile) {
+      // If the user doesn't have the file, no permission needed; auto-approve
+      io.to(roomId).emit('overwritePermissionResponse', {
+        roomId,
+        filename,
+        requestingUserId,
+        targetUserId: userId,
+        approved: true
       });
-  
-    } catch (error) {
-      console.error('Error sharing code:', error);
-      socket.emit('error', { message: 'Failed to share code' });
+      return;
     }
+
+    // Notify the user to ask for overwrite permission
+    socket.broadcast.to(roomId).emit('requestOverwritePermission', {
+      roomId,
+      filename,
+      requestingUserId,
+      requestingUsername,
+      targetUserId: userId
+    });
+  } catch (error) {
+    console.error('Error requesting overwrite permission:', error);
+    socket.emit('error', { message: 'Failed to request overwrite permission' });
+  }
+});
+
+socket.on('overwritePermissionResponse', ({ roomId, filename, requestingUserId, targetUserId, approved }) => {
+  io.to(roomId).emit('overwritePermissionResponse', {
+    roomId,
+    filename,
+    requestingUserId,
+    targetUserId,
+    approved
   });
+});
+
+socket.on('shareCode', async (data) => {
+  if (!socket.user || !socket.user._id) {
+    return socket.emit('error', { message: 'Authentication required to share code' });
+  }
+  const { roomId, fileId, filename, language, code, userId: clientUserId, username: clientUsername, overwrite } = data;
+  const userId = socket.user._id;
+  const username = socket.user.username || socket.user.email.split('@')[0];
+
+  if (userId !== clientUserId) {
+    console.log(`User ID mismatch: socket.user._id=${userId}, clientUserId=${clientUserId}`);
+    return socket.emit('error', { message: 'User ID mismatch, authentication failed' });
+  }
+
+  try {
+    const room = await Room.findOne({ roomId });
+    if (!room) {
+      return socket.emit('error', { message: 'Room not found' });
+    }
+
+    let savedFile = await File.findById(fileId);
+    if (!savedFile || savedFile.userId.toString() !== userId) {
+      return socket.emit('error', { message: 'File not found or not authorized' });
+    }
+
+    if (overwrite) {
+      savedFile = await File.findOneAndUpdate(
+        { _id: fileId, userId },
+        { language, code, updatedAt: Date.now() },
+        { new: true }
+      );
+    }
+
+    io.to(roomId).emit('codeShared', {
+      fileId: savedFile._id,
+      filename: savedFile.filename,
+      language: savedFile.language,
+      code: savedFile.code,
+      userId,
+      username,
+      message: overwrite ? `${username} updated shared code` : `${username} shared new code`
+    });
+
+  } catch (error) {
+    console.error('Error sharing code:', error);
+    socket.emit('error', { message: 'Failed to share code' });
+  }
+});
 
   socket.on('codeSaved', ({ roomId, fileId, filename, language, code, userId, username }) => {
     if (!socket.user || !socket.user._id) {
@@ -637,6 +700,47 @@ fileRoutes.get('/list', auth, async (req, res) => {
   }
 });
 
+fileRoutes.delete('/delete/:fileId', auth, async (req, res) => {
+  try {
+    const fileId = req.params.fileId;
+    const userId = req.user._id;
+
+    const file = await File.findById(fileId);
+    if (!file) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+
+    // Check if the user is in the same room as the file owner
+    const room = await Room.findOne({
+      roomId: { $in: (await Room.find({ users: { $elemMatch: { _id: userId } } })).map(r => r.roomId) },
+      users: { $elemMatch: { _id: file.userId } }
+    });
+
+    if (!room) {
+      return res.status(403).json({ message: 'Permission denied. You must be in the same room as the file owner to delete this file.' });
+    }
+
+    // Delete the file
+    await File.findByIdAndDelete(fileId);
+
+    // Emit a fileDeleted event to all users in the room
+    io.to(room.roomId).emit('fileDeleted', {
+      roomId: room.roomId,
+      fileId,
+      filename: file.filename,
+      userId: file.userId,
+      deletedBy: req.user.username || req.user.email.split('@')[0]
+    });
+
+    console.log(`File deleted: ${file.filename} (ID: ${fileId}) by user: ${userId}`);
+    res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ message: 'Failed to delete file: ' + error.message });
+  }
+});
+
+
 fileRoutes.get('/:fileId', auth, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -832,6 +936,51 @@ app.use('/api/files', fileRoutes);
 app.use('/api/rooms', roomRoutes);
 
 // Global Error Handling Middleware
+
+// Middleware to verify JWT token
+const authenticateToken = (req, res, next) => {
+  const token = req.headers['x-auth-token'];
+  if (!token) return res.status(401).json({ message: 'No token provided' });
+
+  try {
+    const decoded = jwt.verify(token, 'your_jwt_secret');
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+};
+
+app.delete('/api/files/delete/:fileId', authenticateToken, async (req, res) => {
+  const file = await File.findOne({ _id: req.params.fileId });
+  if (!file) return res.status(404).json({ message: 'File not found' });
+
+  // Check if the current user is the file creator
+  if (file.userId.toString() !== req.user._id) {
+    return res.status(403).json({ message: 'Permission denied. Only the file creator can delete this file.' });
+  }
+
+  // Proceed with deletion if the user is the creator
+  await File.findOneAndDelete({ _id: req.params.fileId, userId: req.user._id });
+  const rooms = await Room.find({ users: req.user._id });
+  for (const room of rooms) {
+    const roomId = room.roomId;
+    const roomData = roomsMap.get(roomId);
+    if (roomData) {
+      roomData.files = roomData.files.filter(f => f.fileId !== req.params.fileId.toString());
+      io.to(roomId).emit('fileDeleted', {
+        roomId,
+        fileId: req.params.fileId,
+        filename: file.filename,
+        deletedBy: req.user.username
+      });
+    }
+  }
+
+  res.json({ message: 'File deleted successfully' });
+});
+
+
 app.use((err, req, res, next) => {
   console.error('Server error:', err.stack);
   res.status(500).json({ message: err.message || 'Something went wrong!' });
