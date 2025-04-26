@@ -6,6 +6,8 @@ import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { trigger, state, style, animate, transition } from '@angular/animations';
 import { FormsModule } from '@angular/forms';
 import { HttpClientModule, HttpClient } from '@angular/common/http';
+import jsPDF from 'jspdf'; // Add jsPDF import
+import html2canvas from 'html2canvas';
 import * as THREE from 'three';
 import { Clipboard } from '@angular/cdk/clipboard';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
@@ -1138,6 +1140,13 @@ class AdminComponent implements OnInit {
                 {{ isRunning ? 'Running...' : 'Run Code' }}
               </button>
               <button 
+                (click)="printCode()" 
+                class="glassmorphism-button py-2 px-4 bg-blue-600 hover:bg-blue-700"
+                [disabled]="isRunning || !output || error"
+              >
+                Print
+              </button>
+              <button 
                 (click)="saveCode()" 
                 class="glassmorphism-button py-2 px-4"
                 [disabled]="isSaving || !filename"
@@ -1172,7 +1181,8 @@ class AdminComponent implements OnInit {
         </div>
       </div>
     </div>
-  `
+  `,
+  styles: []
 })
 
 export class CodeComponent implements OnInit, AfterViewInit, OnDestroy {
@@ -1859,6 +1869,40 @@ public class Main {
         this.code = this.editor.getValue();
       });
     });
+  }
+
+  printCode() {
+    if (!this.output || this.error) {
+      this.toastr.warning('Please run the code successfully before printing.', 'Warning');
+      this.runCode();
+      return;
+    }
+  
+    const doc = new jsPDF();
+    const filenameWithExt = this.filename ? `${this.filename}` : 'Untitled';
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 10;
+  
+    doc.setFontSize(20);
+    doc.text(filenameWithExt, margin, 20);
+  
+    doc.setFontSize(12);
+    const codeText = this.code || 'No code available';
+    const codeLines = doc.splitTextToSize(codeText, pageWidth - 2 * margin);
+    doc.text('Code:', margin, 40);
+    doc.text(codeLines, margin, 50);
+  
+    const inputText = this.userInput || 'No input provided';
+    const inputLines = doc.splitTextToSize(inputText, pageWidth - 2 * margin);
+    doc.text('Input:', margin, 70 + codeLines.length * 7);
+    doc.text(inputLines, margin, 80 + codeLines.length * 7);
+  
+    const outputText = this.output || 'No output available';
+    const outputLines = doc.splitTextToSize(outputText, pageWidth - 2 * margin);
+    doc.text('Output:', margin, 100 + codeLines.length * 7 + inputLines.length * 7);
+    doc.text(outputLines, margin, 110 + codeLines.length * 7 + inputLines.length * 7);
+  
+    doc.save(`${filenameWithExt}.pdf`);
   }
 
   private initializeSocketListeners() {
